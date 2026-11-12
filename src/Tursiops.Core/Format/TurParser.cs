@@ -3,16 +3,16 @@ using System.Text;
 namespace Tursiops.Core.Format;
 
 /// <summary>
-/// Liest Ontologie-Dateien im Format v0.1 (Grammatik E-17).
-/// Von Hand geschrieben und bricht beim ersten Fehler ab (E-16).
+/// Reads ontology files in format v0.1 (grammar E-17).
+/// Hand-written; stops at the first error (E-16).
 /// </summary>
 public static class TurParser
 {
     public const string FileExtension = ".tur";
 
-    /// <summary>Liest eine .tur-Datei (E-11).</summary>
-    /// <exception cref="ArgumentException">Die Datei endet nicht auf .tur.</exception>
-    /// <exception cref="TurSyntaxException">Die Datei enthält einen Fehler.</exception>
+    /// <summary>Reads a .tur file (E-11).</summary>
+    /// <exception cref="ArgumentException">The file does not end with .tur.</exception>
+    /// <exception cref="TurSyntaxException">The file contains an error.</exception>
     public static Ontology ParseFile(string path)
     {
         if (!string.Equals(Path.GetExtension(path), FileExtension, StringComparison.OrdinalIgnoreCase))
@@ -23,8 +23,8 @@ public static class TurParser
         return Parse(File.ReadAllText(path, Encoding.UTF8));
     }
 
-    /// <summary>Liest den Inhalt einer Ontologie-Datei.</summary>
-    /// <exception cref="TurSyntaxException">Der Text enthält einen Fehler.</exception>
+    /// <summary>Reads the content of an ontology file.</summary>
+    /// <exception cref="TurSyntaxException">The text contains an error.</exception>
     public static Ontology Parse(string source) => new Parser(source).ParseFile();
 
     private sealed class Parser
@@ -36,14 +36,14 @@ public static class TurParser
 
         public Parser(string source)
         {
-            // Einheitliche Zeilenenden und Unicode-Form, damit "ö" immer dasselbe Zeichen ist.
+            // Uniform line endings and Unicode form, so that "ö" is always the same character.
             _text = source
                 .Replace("\r\n", "\n")
                 .Replace('\r', '\n')
                 .Normalize(NormalizationForm.FormC);
         }
 
-        // ---------- Grammatik ----------
+        // ---------- Grammar ----------
 
         // file = { entity }
         public Ontology ParseFile()
@@ -73,7 +73,7 @@ public static class TurParser
                     $"There is already an entity named '{name}' ({first}). Each entity name may appear only once per file.");
             seenEntities[name] = position;
 
-            // Die öffnende Klammer darf auch in einer späteren Zeile stehen (E-17).
+            // The opening brace may also be on a later line (E-17).
             SkipBlankLinesAndComments();
             if (Current != '{')
                 throw Error(TurErrorKind.ExpectedOpeningBrace, Position,
@@ -86,7 +86,7 @@ public static class TurParser
             SkipSpaces();
             if (Current == '}')
             {
-                // Leere Entität in einer Zeile: "Mensch { }"
+                // Empty entity on one line: "Mensch { }"
                 Advance();
                 ExpectLineEnd("after '}'", "Start the next entity on a new line.");
                 return new EntityDefinition(name, attributes, position);
@@ -103,7 +103,7 @@ public static class TurParser
                         $"The file ended, but the entity '{name}' ({position}) was not closed. Add '}}' on its own line.");
 
                 if (TryConsumeLineEnd())
-                    continue; // Leerzeile oder reine Kommentarzeile
+                    continue; // blank line or comment-only line
 
                 if (Current == '}')
                 {
@@ -202,7 +202,7 @@ public static class TurParser
             return _text[start.._index];
         }
 
-        // ---------- Zeilen, Leerraum, Kommentare ----------
+        // ---------- Lines, whitespace, comments ----------
 
         // line_end = [ comment ] ( newline | end_of_file )
         private void ExpectLineEnd(string where, string hint)
@@ -248,7 +248,7 @@ public static class TurParser
                 Advance();
         }
 
-        // ---------- Zeichen ----------
+        // ---------- Characters ----------
 
         private const char EndOfFile = '\0';
 
@@ -280,7 +280,7 @@ public static class TurParser
 
         private bool IsCommentStart() => Current == '/' && Peek(1) == '/';
 
-        // "in" als eigenes Wort, nicht als Anfang von "inhalt".
+        // "in" as a word of its own, not as the start of "inhalt".
         private bool IsKeywordIn() => Current == 'i' && Peek(1) == 'n' && !IsNameCharacter(Peek(2));
 
         private static bool IsLetter(char c) => c != EndOfFile && char.IsLetter(c);
@@ -294,7 +294,7 @@ public static class TurParser
             _ => $"'{ReadWordForMessage()}'",
         };
 
-        // Für Meldungen das ganze Wort zeigen ("Alter" statt "A"), ohne die Position zu verändern.
+        // Show the whole word in messages ("Alter" instead of "A") without moving the position.
         private string ReadWordForMessage()
         {
             if (!IsNameCharacter(Current))

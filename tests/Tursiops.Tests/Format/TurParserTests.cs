@@ -2,11 +2,11 @@ using Tursiops.Core.Format;
 
 namespace Tursiops.Tests.Format;
 
-// Tests für den Parser des Ontologie-Formats v0.1 (Grammatik E-17, Vorgehen E-16).
-// Fehlertests prüfen Fehlerart, Zeile und Spalte, nicht den Wortlaut der Meldung (E-17).
+// Tests for the parser of ontology format v0.1 (grammar E-17, approach E-16).
+// Error tests check the error kind, line and column, not the message wording (E-17).
 public class TurParserTests
 {
-    // ---------- Gültige Dateien ----------
+    // ---------- Valid files ----------
 
     [Fact]
     public void EmptyFile_HasNoEntities()
@@ -18,7 +18,7 @@ public class TurParserTests
     [Fact]
     public void OnlyCommentsAndBlankLines_HasNoEntities()
     {
-        var ontology = TurParser.Parse("// nur ein Kommentar\n\n   \n// noch einer\n");
+        var ontology = TurParser.Parse("// just a comment\n\n   \n// another one\n");
         Assert.Empty(ontology.Entities);
     }
 
@@ -42,7 +42,7 @@ public class TurParserTests
     [Fact]
     public void Positions_AreOneBasedLineAndColumn()
     {
-        var ontology = TurParser.Parse("// Kopf\nMensch {\n  Name\n}");
+        var ontology = TurParser.Parse("// header\nMensch {\n  Name\n}");
 
         var mensch = Assert.Single(ontology.Entities);
         Assert.Equal(new SourcePosition(2, 1), mensch.Position);
@@ -53,11 +53,11 @@ public class TurParserTests
     public void MultipleEntities_WithBlankLinesAndComments()
     {
         var ontology = TurParser.Parse("""
-            // Menschen
+            // People
             Mensch {
               Name
 
-              // Größe ändert sich
+              // height changes
               Körpergröße @time
             }
 
@@ -85,7 +85,7 @@ public class TurParserTests
     [Fact]
     public void DecomposedUmlauts_AreTreatedLikeComposedOnes()
     {
-        // "Größe" einmal aus fertigen Umlauten, einmal aus Buchstabe + Trema zusammengesetzt.
+        // "Größe" once with precomposed umlauts, once as letter + combining diaeresis.
         var decomposed = "Größe";
         var ontology = TurParser.Parse($"Mensch {{\n  {decomposed}\n}}");
 
@@ -120,7 +120,7 @@ public class TurParserTests
     [Fact]
     public void OpeningBrace_MayFollowAfterBlankAndCommentLines()
     {
-        var ontology = TurParser.Parse("Mensch // ein Mensch\n\n// gleich kommt die Klammer\n{\n  Name\n}");
+        var ontology = TurParser.Parse("Mensch // a person\n\n// the brace comes next\n{\n  Name\n}");
 
         Assert.Single(Assert.Single(ontology.Entities).Attributes);
     }
@@ -129,7 +129,7 @@ public class TurParserTests
     [InlineData("Mensch { }")]
     [InlineData("Mensch {}")]
     [InlineData("Mensch {\n}")]
-    [InlineData("Mensch {\n\n  // noch nichts\n}")]
+    [InlineData("Mensch {\n\n  // nothing yet\n}")]
     public void EmptyEntity_IsAllowed(string source)
     {
         var entity = Assert.Single(TurParser.Parse(source).Entities);
@@ -140,10 +140,10 @@ public class TurParserTests
     public void CommentsAtEndOfAnyLine_AreAllowed()
     {
         var ontology = TurParser.Parse("""
-            Mensch { // Entität
-              Name // Vor- und Nachname
-              Körpergröße @time // ändert sich
-            } // Ende
+            Mensch { // entity
+              Name // first and last name
+              Körpergröße @time // changes
+            } // end
             """);
 
         Assert.Equal(2, Assert.Single(ontology.Entities).Attributes.Count);
@@ -166,7 +166,7 @@ public class TurParserTests
         Assert.True(mensch.Attributes.Single(a => a.Name == "Körpergröße").IsTimed);
     }
 
-    // ---------- Fehler: Klammern und Zeilen ----------
+    // ---------- Errors: braces and lines ----------
 
     [Fact]
     public void MissingOpeningBrace_AtNextAttribute()
@@ -213,7 +213,7 @@ public class TurParserTests
     [Fact]
     public void SingleSlash_IsNotAComment()
     {
-        AssertError("Mensch {\n  Name / Kommentar\n}", TurErrorKind.ExpectedLineEnd, 2, 8);
+        AssertError("Mensch {\n  Name / comment\n}", TurErrorKind.ExpectedLineEnd, 2, 8);
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public class TurParserTests
         AssertError("}", TurErrorKind.ExpectedName, 1, 1);
     }
 
-    // ---------- Fehler: Namen ----------
+    // ---------- Errors: names ----------
 
     [Theory]
     [InlineData("1Mensch {\n}", 1, 1)]
@@ -268,7 +268,7 @@ public class TurParserTests
         Assert.Equal(2, Assert.Single(ontology.Entities).Attributes.Count);
     }
 
-    // ---------- Fehler: Annotationen ----------
+    // ---------- Errors: annotations ----------
 
     [Fact]
     public void UnknownAnnotation_PointsToAtSign()
@@ -295,7 +295,7 @@ public class TurParserTests
         AssertError("Mensch {\n  Größe @ time\n}", TurErrorKind.ExpectedName, 2, 10);
     }
 
-    // ---------- Einheiten (erkannt, aber noch nicht unterstützt) ----------
+    // ---------- Units (recognized, but not supported yet) ----------
 
     [Theory]
     [InlineData("Mensch {\n  Körpergröße in cm\n}", 2, 15)]
@@ -307,7 +307,7 @@ public class TurParserTests
         Assert.Contains("not supported yet", error.Message);
     }
 
-    // ---------- Meldungen und Dateien ----------
+    // ---------- Messages and files ----------
 
     [Fact]
     public void ErrorMessage_StartsWithLineAndColumn()
@@ -332,7 +332,7 @@ public class TurParserTests
         }
     }
 
-    // ---------- Hilfen ----------
+    // ---------- Helpers ----------
 
     private static TurSyntaxException AssertError(string source, TurErrorKind kind, int line, int column)
     {

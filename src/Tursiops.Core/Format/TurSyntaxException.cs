@@ -1,40 +1,40 @@
 namespace Tursiops.Core.Format;
 
-/// <summary>Art eines Fehlers in einer .tur-Datei. Tests prüfen die Art, nicht den Wortlaut (E-17).</summary>
+/// <summary>Kind of error in a .tur file. Tests check the kind, not the wording (E-17).</summary>
 public enum TurErrorKind
 {
-    /// <summary>Ein Name wurde erwartet, etwa für eine Entität, ein Attribut oder nach <c>@</c>.</summary>
+    /// <summary>A name was expected, e.g. for an entity, an attribute or after <c>@</c>.</summary>
     ExpectedName,
 
-    /// <summary><c>{</c> nach dem Entitätsnamen fehlt.</summary>
+    /// <summary><c>{</c> is missing after the entity name.</summary>
     ExpectedOpeningBrace,
 
-    /// <summary>Die Datei endet, bevor die Entität mit <c>}</c> geschlossen wurde.</summary>
+    /// <summary>The file ends before the entity was closed with <c>}</c>.</summary>
     ExpectedClosingBrace,
 
-    /// <summary>Hier hätte die Zeile enden müssen.</summary>
+    /// <summary>The line should have ended here.</summary>
     ExpectedLineEnd,
 
-    /// <summary>Ein Name ist ein Schlüsselwort, etwa <c>in</c>.</summary>
+    /// <summary>A name is a keyword, such as <c>in</c>.</summary>
     ReservedWord,
 
-    /// <summary>Eine Entität dieses Namens gibt es in der Datei schon.</summary>
+    /// <summary>An entity with this name already exists in the file.</summary>
     DuplicateEntity,
 
-    /// <summary>Ein Attribut dieses Namens gibt es in der Entität schon.</summary>
+    /// <summary>An attribute with this name already exists in the entity.</summary>
     DuplicateAttribute,
 
-    /// <summary>Die Annotation ist nicht bekannt.</summary>
+    /// <summary>The annotation is unknown.</summary>
     UnknownAnnotation,
 
-    /// <summary>Die Annotation steht an diesem Attribut schon.</summary>
+    /// <summary>The attribute already has this annotation.</summary>
     DuplicateAnnotation,
 
-    /// <summary>Einheiten (<c>in cm</c>) sind vorgesehen, aber noch nicht unterstützt.</summary>
+    /// <summary>Units (<c>in cm</c>) are planned but not supported yet.</summary>
     UnitsNotSupported,
 }
 
-/// <summary>Fehler in einer .tur-Datei, mit Position und einer Meldung in einfacher Sprache.</summary>
+/// <summary>Error in a .tur file, with its position and a message in plain language.</summary>
 public sealed class TurSyntaxException(TurErrorKind kind, SourcePosition position, string description)
     : Exception($"Line {position.Line}, column {position.Column}: {description}")
 {
@@ -42,6 +42,6 @@ public sealed class TurSyntaxException(TurErrorKind kind, SourcePosition positio
 
     public SourcePosition Position { get; } = position;
 
-    /// <summary>Die Meldung ohne Positionsangabe.</summary>
+    /// <summary>The message without the position.</summary>
     public string Description { get; } = description;
 }

@@ -1,4 +1,4 @@
-// Beispiel-Ontologie für den ersten Prototyp (E-02, E-12)
+// Example ontology for the first prototype (E-02, E-17)
 Mensch {
   Name
   Körpergröße @time
