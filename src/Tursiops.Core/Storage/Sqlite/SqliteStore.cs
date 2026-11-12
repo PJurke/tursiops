@@ -1,10 +1,11 @@
+using Tursiops.Core.Format;
 using Microsoft.Data.Sqlite;
 using static Tursiops.Core.Storage.Sqlite.SqliteNames;
 
 namespace Tursiops.Core.Storage.Sqlite;
 
 /// <summary>
-/// Translation layer to SQLite (E-06, E-20). Only this class knows tables and SQL;
+/// Translation layer to SQLite (E-06, E-26). Only this class knows tables and SQL;
 /// everyone else works with entities, attributes and the structure model.
 /// </summary>
 public sealed class SqliteStore : IDisposable
@@ -50,7 +51,7 @@ public sealed class SqliteStore : IDisposable
         }
     }
 
-    /// <summary>Opens an existing Tursiops database and restores its structure model (E-20).</summary>
+    /// <summary>Opens an existing Tursiops database and restores its structure model (E-26).</summary>
     /// <exception cref="InvalidOperationException">The file is not a Tursiops database.</exception>
     public static SqliteStore Open(string path, TimeProvider? time = null)
     {
@@ -71,7 +72,7 @@ public sealed class SqliteStore : IDisposable
 
     public void Dispose() => _connection.Dispose();
 
-    // ---------- Operations (E-20) ----------
+    // ---------- Operations (E-26) ----------
 
     /// <summary>Creates a new entity, e.g. a person, and returns its reference.</summary>
     public EntityRef CreateEntity(string entity)
@@ -81,13 +82,13 @@ public sealed class SqliteStore : IDisposable
         return new EntityRef(entity, id);
     }
 
-    /// <summary>Sets the value of an attribute without <c>@time</c>.</summary>
+    /// <summary>Sets the value of an attribute without time. Only the last value written counts (E-25).</summary>
     public void SetValue(EntityRef entity, string attribute, object? value)
     {
         var target = Resolve(entity, attribute);
-        if (target.IsTimed)
+        if (target.Time != AttributeTime.Timeless)
             throw new ArgumentException(
-                $"'{entity.Entity}.{attribute}' is marked with @time, so its value needs a time. " +
+                $"'{entity.Entity}.{attribute}' is {StructureModel.Describe(target.Time)}, so its value needs a time. " +
                 "Pass ValueTime.Now or ValueTime.At(...).", nameof(attribute));
 
         Execute(
@@ -95,19 +96,22 @@ public sealed class SqliteStore : IDisposable
             ("$value", value), ("$id", entity.Id));
     }
 
-    /// <summary>Sets the value of an attribute with <c>@time</c>, valid at the given time (E-22).</summary>
+    /// <summary>
+    /// Sets the value of an attribute with <c>@time</c> or <c>@history</c>, valid at the given time (E-27).
+    /// With <c>@time</c> only the value with the latest valid time is kept; with <c>@history</c> every value (E-25).
+    /// </summary>
     public void SetValue(EntityRef entity, string attribute, object? value, ValueTime time)
     {
         var target = Resolve(entity, attribute);
-        if (!target.IsTimed)
+        if (target.Time == AttributeTime.Timeless)
             throw new ArgumentException(
-                $"'{entity.Entity}.{attribute}' is not marked with @time, so its value takes no time.", nameof(time));
+                $"'{entity.Entity}.{attribute}' is {StructureModel.Describe(target.Time)}, so its value takes no time.", nameof(time));
 
         var validAt = time.Resolve(_time);
         var utc = ToSortableUtc(validAt);
         var offset = ToOffsetMinutes(validAt);
 
-        if (target.Layout == AttributeLayout.History)
+        if (target.Layout == AttributeLayout.HistoryTable)
         {
             Execute(
                 $"INSERT INTO {Quote(HistoryTable(entity.Entity, attribute))} " +
@@ -117,7 +121,7 @@ public sealed class SqliteStore : IDisposable
             return;
         }
 
-        // Current value only: an older measurement that arrives late does not replace a newer one.
+        // ColumnWithTime: an older measurement that arrives late does not replace a newer one (E-25).
         var validAtColumn = Quote(CurrentValidAtColumn(attribute));
         Execute(
             $"UPDATE {Quote(EntityTable(entity.Entity))} " +
@@ -128,13 +132,14 @@ public sealed class SqliteStore : IDisposable
 
     /// <summary>
     /// Reads the current value of an attribute, or <c>null</c> if it was never set.
-    /// For attributes with <c>@time</c> this is the value with the latest valid time, not the last one written.
+    /// For attributes with <c>@time</c> or <c>@history</c> this is the value with the latest valid time,
+    /// not the last one written.
     /// </summary>
     public StoredValue? GetCurrentValue(EntityRef entity, string attribute)
     {
         var target = Resolve(entity, attribute);
 
-        if (!target.IsTimed)
+        if (target.Layout == AttributeLayout.Column)
         {
             var value = Scalar(
                 $"SELECT {Quote(attribute)} FROM {Quote(EntityTable(entity.Entity))} WHERE {Quote(IdColumn)} = $id",
@@ -142,26 +147,29 @@ public sealed class SqliteStore : IDisposable
             return value is null or DBNull ? null : new StoredValue(value, null);
         }
 
-        var latest = target.Layout == AttributeLayout.History
+        var latest = target.Layout == AttributeLayout.HistoryTable
             ? ReadHistory(entity, attribute, newestFirst: true, limit: 1)
             : ReadCurrentTimed(entity, attribute);
         return latest.Count == 0 ? null : new StoredValue(latest[0].Value, latest[0].ValidAt);
     }
 
     /// <summary>
-    /// Reads all stored values of an attribute with <c>@time</c>, oldest first.
-    /// With the layout <see cref="AttributeLayout.CurrentValue"/> this is at most the one current value.
+    /// Reads all values of an attribute with <c>@history</c>, oldest first.
+    /// Other attributes have no history as part of their information (E-25), so asking for it is an error.
     /// </summary>
     public IReadOnlyList<TimedValue> GetHistory(EntityRef entity, string attribute)
     {
         var target = Resolve(entity, attribute);
-        if (!target.IsTimed)
+        if (target.Time != AttributeTime.History)
             throw new ArgumentException(
-                $"'{entity.Entity}.{attribute}' is not marked with @time, so it has no history.", nameof(attribute));
+                $"'{entity.Entity}.{attribute}' is {StructureModel.Describe(target.Time)}, so it keeps no history. " +
+                "Mark it with @history in the ontology if its history is needed.", nameof(attribute));
 
-        return target.Layout == AttributeLayout.History
-            ? ReadHistory(entity, attribute, newestFirst: false, limit: null)
-            : ReadCurrentTimed(entity, attribute);
+        return target.Layout switch
+        {
+            AttributeLayout.HistoryTable => ReadHistory(entity, attribute, newestFirst: false, limit: null),
+            _ => throw new InvalidOperationException($"Layout {target.Layout} cannot hold a history."),
+        };
     }
 
     // ---------- Reading timed values ----------
@@ -221,7 +229,7 @@ public sealed class SqliteStore : IDisposable
         Execute(connection, transaction,
             $"CREATE TABLE {Quote(StructureTable)} (" +
             "entity TEXT NOT NULL, attribute TEXT NOT NULL, position INTEGER NOT NULL, " +
-            "timed INTEGER NOT NULL, layout TEXT NOT NULL, PRIMARY KEY (entity, attribute))");
+            "time TEXT NOT NULL, layout TEXT NOT NULL, PRIMARY KEY (entity, attribute))");
 
         for (var e = 0; e < structure.Entities.Count; e++)
         {
@@ -234,10 +242,10 @@ public sealed class SqliteStore : IDisposable
             {
                 var attribute = entity.Attributes[a];
                 Execute(connection, transaction,
-                    $"INSERT INTO {Quote(StructureTable)} (entity, attribute, position, timed, layout) " +
-                    "VALUES ($entity, $attribute, $position, $timed, $layout)",
+                    $"INSERT INTO {Quote(StructureTable)} (entity, attribute, position, time, layout) " +
+                    "VALUES ($entity, $attribute, $position, $time, $layout)",
                     ("$entity", entity.Name), ("$attribute", attribute.Name), ("$position", a),
-                    ("$timed", attribute.IsTimed), ("$layout", attribute.Layout.ToString()));
+                    ("$time", attribute.Time.ToString()), ("$layout", attribute.Layout.ToString()));
             }
         }
     }
@@ -248,7 +256,7 @@ public sealed class SqliteStore : IDisposable
         using (var command = connection.CreateCommand())
         {
             command.CommandText =
-                $"SELECT entity, attribute, timed, layout FROM {Quote(StructureTable)} ORDER BY entity, position";
+                $"SELECT entity, attribute, time, layout FROM {Quote(StructureTable)} ORDER BY entity, position";
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
@@ -256,7 +264,7 @@ public sealed class SqliteStore : IDisposable
                 var list = attributes.TryGetValue(reader.GetString(0), out var existing)
                     ? existing
                     : attributes[reader.GetString(0)] = [];
-                list.Add(new AttributeStructure(reader.GetString(1), reader.GetBoolean(2), layout));
+                list.Add(new AttributeStructure(reader.GetString(1), Enum.Parse<AttributeTime>(reader.GetString(2)), layout));
             }
         }
 
@@ -279,10 +287,10 @@ public sealed class SqliteStore : IDisposable
     {
         // Untyped value columns: SQLite keeps the type of each value (E-13, E-23).
         var columns = new List<string> { $"{Quote(IdColumn)} INTEGER PRIMARY KEY" };
-        foreach (var attribute in entity.Attributes.Where(a => a.Layout == AttributeLayout.CurrentValue))
+        foreach (var attribute in entity.Attributes.Where(a => a.Layout is AttributeLayout.Column or AttributeLayout.ColumnWithTime))
         {
             columns.Add(Quote(attribute.Name));
-            if (attribute.IsTimed)
+            if (attribute.Layout == AttributeLayout.ColumnWithTime)
             {
                 columns.Add($"{Quote(CurrentValidAtColumn(attribute.Name))} TEXT");
                 columns.Add($"{Quote(CurrentValidOffsetColumn(attribute.Name))} INTEGER");
@@ -291,7 +299,7 @@ public sealed class SqliteStore : IDisposable
         Execute(connection, transaction,
             $"CREATE TABLE {Quote(EntityTable(entity.Name))} ({string.Join(", ", columns)})");
 
-        foreach (var attribute in entity.Attributes.Where(a => a.Layout == AttributeLayout.History))
+        foreach (var attribute in entity.Attributes.Where(a => a.Layout == AttributeLayout.HistoryTable))
         {
             var table = Quote(HistoryTable(entity.Name, attribute.Name));
             Execute(connection, transaction,

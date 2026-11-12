@@ -3,7 +3,7 @@ using System.Globalization;
 namespace Tursiops.Core.Storage.Sqlite;
 
 // Names of tables and columns in SQLite (E-21).
-// Ontology names never contain dots and always start with a letter (E-17),
+// Ontology names never contain dots and always start with a letter (E-24),
 // so names with a dot or a leading underscore can never collide with them.
 internal static class SqliteNames
 {

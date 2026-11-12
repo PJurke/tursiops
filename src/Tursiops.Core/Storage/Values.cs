@@ -3,14 +3,14 @@ namespace Tursiops.Core.Storage;
 /// <summary>Reference to one stored entity, e.g. one person (E-23: internal integer key).</summary>
 public readonly record struct EntityRef(string Entity, long Id);
 
-/// <summary>The current value of an attribute. <see cref="ValidAt"/> is set for attributes with <c>@time</c>.</summary>
+/// <summary>The current value of an attribute. <see cref="ValidAt"/> is set for attributes with <c>@time</c> or <c>@history</c>.</summary>
 public sealed record StoredValue(object? Value, DateTimeOffset? ValidAt);
 
-/// <summary>A value of an attribute with <c>@time</c> and the time it was valid.</summary>
+/// <summary>A value of a time-dependent attribute and the time it was valid.</summary>
 public sealed record TimedValue(object? Value, DateTimeOffset ValidAt);
 
 /// <summary>
-/// When a value of an attribute with <c>@time</c> was valid (E-22).
+/// When a value of an attribute with <c>@time</c> or <c>@history</c> was valid (E-27).
 /// Always explicit: either a given point in time or <see cref="Now"/>, filled in by the database.
 /// </summary>
 public readonly struct ValueTime

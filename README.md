@@ -6,7 +6,7 @@ The name comes from the common bottlenose dolphin (*Tursiops truncatus*). Dolphi
 
 ## Status
 
-First prototype in progress. It demonstrates a single concept, time: an attribute is described as changing over time, Tursiops observes the data and, during sleep, rebuilds it from "current value only" to "value with history" when the data suggests it. Every decision is recorded in a readable log.
+First prototype in progress. It demonstrates a single concept, time. The admin decides what information exists: whether an attribute is timeless, has a current state over time (`@time`) or keeps its full history (`@history`). Tursiops decides how to store it, observes how the data is used and, during sleep, rebuilds the storage when the data suggests it, without ever changing what information is kept. Every decision is recorded in a readable log.
 
 ## Ontology format (v0.1)
 
@@ -14,12 +14,15 @@ Files end with `.tur`:
 
 ```
 Mensch {
-  Name
-  Körpergröße @time
+  Name                    // timeless: only the last value written counts
+  Wohnort @time           // only the current state counts, by the time it was valid
+  Körpergröße @history    // every value is kept with the time it was valid
 }
 ```
 
 Entity and attribute names are free to choose, in any language; keywords and annotations such as `@time` are English.
+
+Redundant annotations such as `@time @time`, or `@time` next to `@history`, are reported as warnings and do not stop parsing.
 
 Example: [`examples/mensch.tur`](examples/mensch.tur)
 

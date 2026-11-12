@@ -3,8 +3,8 @@ using System.Text;
 namespace Tursiops.Core.Format;
 
 /// <summary>
-/// Reads ontology files in format v0.1 (grammar E-17).
-/// Hand-written; stops at the first error (E-16).
+/// Reads ontology files in format v0.1 (grammar E-24).
+/// Hand-written; stops at the first error, collects warnings without stopping (E-16, E-24).
 /// </summary>
 public static class TurParser
 {
@@ -13,7 +13,7 @@ public static class TurParser
     /// <summary>Reads a .tur file (E-11).</summary>
     /// <exception cref="ArgumentException">The file does not end with .tur.</exception>
     /// <exception cref="TurSyntaxException">The file contains an error.</exception>
-    public static Ontology ParseFile(string path)
+    public static TurParseResult ParseFile(string path)
     {
         if (!string.Equals(Path.GetExtension(path), FileExtension, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException(
@@ -25,11 +25,12 @@ public static class TurParser
 
     /// <summary>Reads the content of an ontology file.</summary>
     /// <exception cref="TurSyntaxException">The text contains an error.</exception>
-    public static Ontology Parse(string source) => new Parser(source).ParseFile();
+    public static TurParseResult Parse(string source) => new Parser(source).ParseFile();
 
     private sealed class Parser
     {
         private readonly string _text;
+        private readonly List<TurWarning> _warnings = [];
         private int _index;
         private int _line = 1;
         private int _column = 1;
@@ -46,7 +47,7 @@ public static class TurParser
         // ---------- Grammar ----------
 
         // file = { entity }
-        public Ontology ParseFile()
+        public TurParseResult ParseFile()
         {
             var entities = new List<EntityDefinition>();
             var seen = new Dictionary<string, SourcePosition>(StringComparer.Ordinal);
@@ -59,7 +60,7 @@ public static class TurParser
                 SkipBlankLinesAndComments();
             }
 
-            return new Ontology(entities);
+            return new TurParseResult(new Ontology(entities), _warnings);
         }
 
         // entity = name "{" ( "}" | line_end { attribute } "}" ) line_end
@@ -127,7 +128,7 @@ public static class TurParser
                     $"The entity '{entityName}' already has an attribute named '{name}' ({first}).");
             seenAttributes[name] = position;
 
-            var annotations = new List<string>();
+            var annotations = new List<(string Name, SourcePosition Position)>();
             while (true)
             {
                 SkipSpaces();
@@ -146,29 +147,41 @@ public static class TurParser
                         $"Expected an annotation name directly after '@', but found {Describe(Current)}.");
 
                 var annotation = ReadNameCharacters();
-                CheckAnnotation(annotation, atPosition, name, annotations);
-                annotations.Add(annotation);
+                CheckAnnotation(annotation, atPosition);
+                if (annotations.Any(a => a.Name == annotation))
+                    Warn(TurWarningKind.DuplicateAnnotation, atPosition,
+                        $"The attribute '{name}' already has '@{annotation}'. The second one has no effect and can be removed.");
+                else
+                    annotations.Add((annotation, atPosition));
             }
+
+            WarnIfTimeIsRedundant(name, annotations);
 
             ExpectLineEnd($"after the attribute '{name}'", Current switch
             {
                 '}' => "Put '}' on its own line.",
                 _ when IsLetter(Current) => "Names cannot contain spaces, and each attribute needs its own line.",
-                _ => "Only annotations like '@time' or a comment ('//') may follow an attribute.",
+                _ => "Only annotations like '@time' or '@history' or a comment ('//') may follow an attribute.",
             });
 
-            return new AttributeDefinition(name, annotations, position);
+            return new AttributeDefinition(name, annotations.Select(a => a.Name).ToList(), position);
         }
 
-        private static void CheckAnnotation(string annotation, SourcePosition position, string attributeName, List<string> existing)
+        // '@history' already includes time, so '@time' next to it says nothing new (E-24).
+        private void WarnIfTimeIsRedundant(string attributeName, List<(string Name, SourcePosition Position)> annotations)
+        {
+            if (!annotations.Any(a => a.Name == Annotation.History))
+                return;
+
+            foreach (var time in annotations.Where(a => a.Name == Annotation.Time))
+                Warn(TurWarningKind.RedundantTime, time.Position,
+                    $"'@{Annotation.History}' already includes time, so '@{Annotation.Time}' on '{attributeName}' has no effect and can be removed.");
+        }
+
+        private static void CheckAnnotation(string annotation, SourcePosition position)
         {
             if (Annotation.Known.Contains(annotation, StringComparer.Ordinal))
-            {
-                if (existing.Contains(annotation, StringComparer.Ordinal))
-                    throw Error(TurErrorKind.DuplicateAnnotation, position,
-                        $"The attribute '{attributeName}' already has '@{annotation}'. Use each annotation only once.");
                 return;
-            }
 
             var suggestion = Annotation.Known.FirstOrDefault(k => string.Equals(k, annotation, StringComparison.OrdinalIgnoreCase));
             var hint = suggestion is not null
@@ -305,6 +318,9 @@ public static class TurParser
                 end++;
             return _text[_index..end];
         }
+
+        private void Warn(TurWarningKind kind, SourcePosition position, string description) =>
+            _warnings.Add(new TurWarning(kind, position, description));
 
         private static TurSyntaxException Error(TurErrorKind kind, SourcePosition position, string description) =>
             new(kind, position, description);

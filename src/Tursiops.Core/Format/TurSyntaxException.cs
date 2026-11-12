@@ -27,9 +27,6 @@ public enum TurErrorKind
     /// <summary>The annotation is unknown.</summary>
     UnknownAnnotation,
 
-    /// <summary>The attribute already has this annotation.</summary>
-    DuplicateAnnotation,
-
     /// <summary>Units (<c>in cm</c>) are planned but not supported yet.</summary>
     UnitsNotSupported,
 }

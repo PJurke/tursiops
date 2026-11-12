@@ -5,13 +5,14 @@ using Tursiops.Core.Storage.Sqlite;
 
 namespace Tursiops.Tests.Storage;
 
-// Tests for the translation layer to SQLite (E-20 to E-23).
+// Tests for the translation layer to SQLite (E-21, E-23, E-25 to E-27).
 public class SqliteStoreTests : IDisposable
 {
     private const string Source = """
         Mensch {
           Name
-          Körpergröße @time
+          Wohnort @time
+          Körpergröße @history
         }
         """;
 
@@ -25,33 +26,33 @@ public class SqliteStoreTests : IDisposable
     // ---------- Structure model ----------
 
     [Fact]
-    public void StructureFromOntology_StartsWithCurrentValueEverywhere() // E-02: start simple
+    public void StructureFromOntology_FollowsTheInformationTheUserDescribed() // E-25, ablageformen.md
     {
-        var model = StructureModel.FromOntology(TurParser.Parse(Source));
+        var mensch = Assert.Single(Model().Entities);
 
-        var mensch = Assert.Single(model.Entities);
-        Assert.All(mensch.Attributes, a => Assert.Equal(AttributeLayout.CurrentValue, a.Layout));
-        Assert.True(mensch.Attribute("Körpergröße").IsTimed);
-        Assert.False(mensch.Attribute("Name").IsTimed);
+        Assert.Equal(new AttributeStructure("Name", AttributeTime.Timeless, AttributeLayout.Column), mensch.Attribute("Name"));
+        Assert.Equal(new AttributeStructure("Wohnort", AttributeTime.CurrentOnly, AttributeLayout.ColumnWithTime), mensch.Attribute("Wohnort"));
+        Assert.Equal(new AttributeStructure("Körpergröße", AttributeTime.History, AttributeLayout.HistoryTable), mensch.Attribute("Körpergröße"));
+    }
+
+    [Theory] // E-25: a layout never changes the information
+    [InlineData("Name", AttributeLayout.HistoryTable)]
+    [InlineData("Wohnort", AttributeLayout.HistoryTable)]
+    [InlineData("Körpergröße", AttributeLayout.ColumnWithTime)]
+    [InlineData("Körpergröße", AttributeLayout.Column)]
+    public void WithLayout_RejectsLayoutsThatDoNotFitTheInformation(string attribute, AttributeLayout layout)
+    {
+        Assert.Throws<ArgumentException>(() => Model().WithLayout("Mensch", attribute, layout));
     }
 
     [Fact]
-    public void HistoryLayout_IsOnlyAllowedForTimedAttributes() // E-03
+    public void WithLayout_ReturnsChangedCopy_ForAnAllowedLayout()
     {
-        var model = StructureModel.FromOntology(TurParser.Parse(Source));
+        var model = Model();
+        var changed = model.WithLayout("Mensch", "Körpergröße", AttributeLayout.HistoryTable);
 
-        var error = Assert.Throws<ArgumentException>(() => model.WithLayout("Mensch", "Name", AttributeLayout.History));
-        Assert.Contains("@time", error.Message);
-    }
-
-    [Fact]
-    public void WithLayout_ReturnsChangedCopy()
-    {
-        var model = StructureModel.FromOntology(TurParser.Parse(Source));
-        var changed = model.WithLayout("Mensch", "Körpergröße", AttributeLayout.History);
-
-        Assert.Equal(AttributeLayout.CurrentValue, model.Entity("Mensch").Attribute("Körpergröße").Layout);
-        Assert.Equal(AttributeLayout.History, changed.Entity("Mensch").Attribute("Körpergröße").Layout);
+        Assert.Equal(model.Entity("Mensch").Attribute("Körpergröße"), changed.Entity("Mensch").Attribute("Körpergröße"));
+        Assert.NotSame(model, changed);
     }
 
     // ---------- Creating and opening ----------
@@ -60,32 +61,32 @@ public class SqliteStoreTests : IDisposable
     public void Create_UsesOntologyNamesForTables() // E-21
     {
         var path = TempFile();
-        using (SqliteStore.Create(path, History())) { }
+        using (SqliteStore.Create(path, Model())) { }
 
-        Assert.Contains("Mensch", Tables(path));
-        Assert.Contains("Mensch.Körpergröße", Tables(path));
-        Assert.Contains("_tursiops_structure", Tables(path));
+        var tables = Tables(path);
+        Assert.Contains("Mensch", tables);
+        Assert.Contains("Mensch.Körpergröße", tables);
+        Assert.DoesNotContain("Mensch.Wohnort", tables); // @time keeps no history (E-25)
+        Assert.Contains("_tursiops_structure", tables);
     }
 
     [Fact]
     public void Create_RefusesAnExistingTursiopsDatabase()
     {
         var path = TempFile();
-        using (SqliteStore.Create(path, Current())) { }
+        using (SqliteStore.Create(path, Model())) { }
 
-        Assert.Throws<InvalidOperationException>(() => SqliteStore.Create(path, Current()));
+        Assert.Throws<InvalidOperationException>(() => SqliteStore.Create(path, Model()));
     }
 
     [Fact]
-    public void Open_RestoresStructureModelFromTheFile() // E-20
+    public void Open_RestoresStructureModelFromTheFile() // E-26
     {
         var path = TempFile();
-        using (SqliteStore.Create(path, History())) { }
+        using (SqliteStore.Create(path, Model())) { }
 
         using var store = SqliteStore.Open(path);
-        Assert.Equal(AttributeLayout.History, store.Structure.Entity("Mensch").Attribute("Körpergröße").Layout);
-        Assert.Equal(AttributeLayout.CurrentValue, store.Structure.Entity("Mensch").Attribute("Name").Layout);
-        Assert.True(store.Structure.Entity("Mensch").Attribute("Körpergröße").IsTimed);
+        Assert.Equal(Model().Entities.Single().Attributes, store.Structure.Entity("Mensch").Attributes);
     }
 
     [Fact]
@@ -109,16 +110,18 @@ public class SqliteStoreTests : IDisposable
     {
         var path = TempFile();
         EntityRef anna;
-        using (var store = SqliteStore.Create(path, History()))
+        using (var store = SqliteStore.Create(path, Model()))
         {
             anna = store.CreateEntity("Mensch");
             store.SetValue(anna, "Name", "Anna");
+            store.SetValue(anna, "Wohnort", "Leipzig", ValueTime.At(Age10));
             store.SetValue(anna, "Körpergröße", 142L, ValueTime.At(Age10));
         }
 
         using (var store = SqliteStore.Open(path))
         {
             Assert.Equal("Anna", store.GetCurrentValue(anna, "Name")!.Value);
+            Assert.Equal("Leipzig", store.GetCurrentValue(anna, "Wohnort")!.Value);
             Assert.Single(store.GetHistory(anna, "Körpergröße"));
         }
     }
@@ -128,7 +131,7 @@ public class SqliteStoreTests : IDisposable
     [Fact]
     public void CreateEntity_HandsOutIncreasingIds() // E-23
     {
-        using var store = Memory(Current());
+        using var store = Memory(Model());
 
         var first = store.CreateEntity("Mensch");
         var second = store.CreateEntity("Mensch");
@@ -140,14 +143,14 @@ public class SqliteStoreTests : IDisposable
     [Fact]
     public void UnknownEntity_IsAnError()
     {
-        using var store = Memory(Current());
+        using var store = Memory(Model());
         Assert.Throws<ArgumentException>(() => store.CreateEntity("Tier"));
     }
 
     [Fact]
     public void UnknownAttribute_IsAnError()
     {
-        using var store = Memory(Current());
+        using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
         Assert.Throws<ArgumentException>(() => store.SetValue(anna, "Gewicht", 60L));
     }
@@ -155,7 +158,7 @@ public class SqliteStoreTests : IDisposable
     [Fact]
     public void EntityThatDoesNotExist_IsAnError()
     {
-        using var store = Memory(Current());
+        using var store = Memory(Model());
         var ghost = new EntityRef("Mensch", 999);
         Assert.Throws<ArgumentException>(() => store.SetValue(ghost, "Name", "Geist"));
     }
@@ -165,7 +168,7 @@ public class SqliteStoreTests : IDisposable
     [Fact]
     public void UntimedValue_IsSetAndRead()
     {
-        using var store = Memory(Current());
+        using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
 
         store.SetValue(anna, "Name", "Anna");
@@ -179,35 +182,39 @@ public class SqliteStoreTests : IDisposable
     [Fact]
     public void ValueNeverSet_ReadsAsNull()
     {
-        using var store = Memory(Current());
+        using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
 
         Assert.Null(store.GetCurrentValue(anna, "Name"));
+        Assert.Null(store.GetCurrentValue(anna, "Wohnort"));
         Assert.Null(store.GetCurrentValue(anna, "Körpergröße"));
     }
 
     [Fact]
-    public void UntimedValue_RejectsATime() // E-22
+    public void UntimedValue_RejectsATime() // E-27
     {
-        using var store = Memory(Current());
+        using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
 
         Assert.Throws<ArgumentException>(() => store.SetValue(anna, "Name", "Anna", ValueTime.Now));
     }
 
-    [Fact]
-    public void History_OfUntimedAttribute_IsAnError()
+    [Theory] // E-25: only @history keeps a history as part of the information
+    [InlineData("Name")]
+    [InlineData("Wohnort")]
+    public void History_OfAttributeWithoutHistory_IsAnError(string attribute)
     {
-        using var store = Memory(Current());
+        using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
 
-        Assert.Throws<ArgumentException>(() => store.GetHistory(anna, "Name"));
+        var error = Assert.Throws<ArgumentException>(() => store.GetHistory(anna, attribute));
+        Assert.Contains("@history", error.Message);
     }
 
     [Fact]
     public void ValuesKeepTheirType() // E-13
     {
-        using var store = Memory(Current());
+        using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
 
         store.SetValue(anna, "Name", 42L);
@@ -220,50 +227,70 @@ public class SqliteStoreTests : IDisposable
         Assert.Equal("Anna", store.GetCurrentValue(anna, "Name")!.Value);
     }
 
-    // ---------- Values with @time ----------
+    // ---------- Values with @time and @history ----------
 
-    [Fact]
-    public void TimedValue_RequiresAnExplicitTime() // E-22
+    [Theory] // E-27
+    [InlineData("Wohnort")]
+    [InlineData("Körpergröße")]
+    public void TimedValue_RequiresAnExplicitTime(string attribute)
     {
-        using var store = Memory(Current());
+        using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
 
-        var error = Assert.Throws<ArgumentException>(() => store.SetValue(anna, "Körpergröße", 142L));
+        var error = Assert.Throws<ArgumentException>(() => store.SetValue(anna, attribute, 142L));
         Assert.Contains("ValueTime", error.Message);
     }
 
-    [Fact]
-    public void ValueTimeNow_IsFilledInByTheDatabase() // E-22
+    [Theory] // E-27
+    [InlineData("Wohnort")]
+    [InlineData("Körpergröße")]
+    public void ValueTimeNow_IsFilledInByTheDatabase(string attribute)
     {
-        using var store = Memory(Current());
+        using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
 
-        store.SetValue(anna, "Körpergröße", 142L, ValueTime.Now);
+        store.SetValue(anna, attribute, 142L, ValueTime.Now);
 
-        Assert.Equal(Now, store.GetCurrentValue(anna, "Körpergröße")!.ValidAt);
+        Assert.Equal(Now, store.GetCurrentValue(anna, attribute)!.ValidAt);
     }
 
-    [Theory]
-    [InlineData(AttributeLayout.CurrentValue)]
-    [InlineData(AttributeLayout.History)]
-    public void CurrentValue_IsTheLatestByValidTime_NotByWriteOrder(AttributeLayout layout)
+    [Theory] // E-25: a late entry of an older measurement does not replace the current one
+    [InlineData("Wohnort")]
+    [InlineData("Körpergröße")]
+    public void CurrentValue_IsTheLatestByValidTime_NotByWriteOrder(string attribute)
     {
-        using var store = Memory(layout == AttributeLayout.History ? History() : Current());
+        using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
 
-        store.SetValue(anna, "Körpergröße", 155L, ValueTime.At(Age12));
-        store.SetValue(anna, "Körpergröße", 168L, ValueTime.At(Age14));
-        store.SetValue(anna, "Körpergröße", 142L, ValueTime.At(Age10)); // late entry of an older measurement
+        store.SetValue(anna, attribute, 155L, ValueTime.At(Age12));
+        store.SetValue(anna, attribute, 168L, ValueTime.At(Age14));
+        store.SetValue(anna, attribute, 142L, ValueTime.At(Age10));
 
-        var current = store.GetCurrentValue(anna, "Körpergröße");
+        var current = store.GetCurrentValue(anna, attribute);
         Assert.Equal(168L, current!.Value);
         Assert.Equal(Age14, current.ValidAt);
     }
 
     [Fact]
-    public void HistoryLayout_KeepsAllValues_OrderedByValidTime()
+    public void Time_KeepsOnlyTheLatestValue_InTheDatabase() // E-25: @time
     {
-        using var store = Memory(History());
+        var path = TempFile();
+        using (var store = SqliteStore.Create(path, Model()))
+        {
+            var anna = store.CreateEntity("Mensch");
+            store.SetValue(anna, "Wohnort", "Dresden", ValueTime.At(Age10));
+            store.SetValue(anna, "Wohnort", "Leipzig", ValueTime.At(Age12));
+        }
+
+        // The older value is gone from the file itself, not just hidden.
+        Assert.Equal(0L, Count(path, "SELECT count(*) FROM \"Mensch\" WHERE \"Wohnort\" = 'Dresden'"));
+        Assert.Equal(1L, Count(path, "SELECT count(*) FROM \"Mensch\" WHERE \"Wohnort\" = 'Leipzig'"));
+    }
+
+    [Fact]
+    public void History_KeepsAllValues_OrderedByValidTime() // E-25: @history
+    {
+        using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
 
         store.SetValue(anna, "Körpergröße", 155L, ValueTime.At(Age12));
@@ -276,22 +303,9 @@ public class SqliteStoreTests : IDisposable
     }
 
     [Fact]
-    public void CurrentValueLayout_KeepsOnlyTheLatest()
-    {
-        using var store = Memory(Current());
-        var anna = store.CreateEntity("Mensch");
-
-        store.SetValue(anna, "Körpergröße", 142L, ValueTime.At(Age10));
-        store.SetValue(anna, "Körpergröße", 155L, ValueTime.At(Age12));
-
-        var history = Assert.Single(store.GetHistory(anna, "Körpergröße"));
-        Assert.Equal(155L, history.Value);
-    }
-
-    [Fact]
     public void HistoryOfDifferentEntities_IsSeparate()
     {
-        using var store = Memory(History());
+        using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
         var ben = store.CreateEntity("Mensch");
 
@@ -303,26 +317,25 @@ public class SqliteStoreTests : IDisposable
         Assert.Equal(2, store.GetHistory(ben, "Körpergröße").Count);
     }
 
-    [Fact]
-    public void ValidTimes_KeepTheirOffset()
+    [Theory]
+    [InlineData("Wohnort")]
+    [InlineData("Körpergröße")]
+    public void ValidTimes_KeepTheirOffset(string attribute)
     {
-        using var store = Memory(History());
+        using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
         var berlin = new DateTimeOffset(2016, 3, 3, 9, 30, 0, TimeSpan.FromHours(1));
 
-        store.SetValue(anna, "Körpergröße", 142L, ValueTime.At(berlin));
+        store.SetValue(anna, attribute, 142L, ValueTime.At(berlin));
 
-        var stored = Assert.Single(store.GetHistory(anna, "Körpergröße")).ValidAt;
+        var stored = store.GetCurrentValue(anna, attribute)!.ValidAt!.Value;
         Assert.Equal(berlin, stored);
         Assert.Equal(berlin.Offset, stored.Offset);
     }
 
     // ---------- Helpers ----------
 
-    private static StructureModel Current() => StructureModel.FromOntology(TurParser.Parse(Source));
-
-    private static StructureModel History() =>
-        Current().WithLayout("Mensch", "Körpergröße", AttributeLayout.History);
+    private static StructureModel Model() => StructureModel.FromOntology(TurParser.Parse(Source).Ontology);
 
     private static SqliteStore Memory(StructureModel model) =>
         SqliteStore.Create(":memory:", model, new FixedTimeProvider(Now));
@@ -332,6 +345,15 @@ public class SqliteStoreTests : IDisposable
         var path = Path.Combine(Path.GetTempPath(), $"tursiops-{Guid.NewGuid():N}.db");
         _files.Add(path);
         return path;
+    }
+
+    private static long Count(string path, string sql)
+    {
+        using var connection = new SqliteConnection($"Data Source={path};Pooling=False");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return (long)command.ExecuteScalar()!;
     }
 
     private static List<string> Tables(string path)
