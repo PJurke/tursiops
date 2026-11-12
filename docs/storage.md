@@ -38,6 +38,8 @@ Value columns have no declared type. SQLite keeps the type of each value as it w
 | `ColumnWithTime` | `@time` | Columns `<Attribute>`, `<Attribute>._valid_at` and `<Attribute>._valid_offset` in the entity table. A write only replaces the value if its valid time is not older than the stored one. |
 | `HistoryTable` (H2) | `@history` | Table `<Entity>.<Attribute>` with `_entity` (references `_id`), `<Attribute>`, `_valid_at` and `_valid_offset`, plus index `<Entity>.<Attribute>._by_time` on `(_entity, _valid_at)`. Every write adds a row. The current value is the row with the latest valid time. |
 
+Known methods for time-dependent attributes and their status: [`concepts/time.md`](concepts/time.md).
+
 ## Valid times
 
 - `_valid_at` holds the valid time in UTC as fixed-width text (`yyyy-MM-ddTHH:mm:ss.fffffffZ`), so text order equals time order.

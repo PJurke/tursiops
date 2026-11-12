@@ -36,7 +36,7 @@ Full specification: [`docs/format.md`](docs/format.md)
 | `src/Tursiops.Cli` | Command line, e.g. to trigger sleep and play the demo scenario |
 | `tests/Tursiops.Tests` | Tests (xUnit) |
 | `examples` | Example ontologies |
-| `docs` | Developer documentation, e.g. the format specification |
+| `docs` | Developer documentation: format specification, storage layout, known methods per concept (`docs/concepts`) |
 
 ## Build
 
