@@ -1,6 +1,6 @@
 # Concept: Time
 
-Known methods for storing time-dependent attributes, and how far Tursiops implements them. The methods are building blocks: a storage layout combines one choice per axis. Which layouts Tursiops actually uses is specified in [`../storage.md`](../storage.md). Why, is recorded in the project's decision log (E-25 to E-29).
+Known methods for storing time-dependent attributes, and how far Tursiops implements them. The methods are building blocks: a storage layout combines one choice per axis. Which layouts Tursiops actually uses is specified in [`../storage.md`](../storage.md). Why, is recorded in the project's decision log (E-25 to E-30).
 
 What the user declares decides the content (no annotation, `@time`, `@history`). The methods below only decide how that content is stored. A change of method never changes the information (E-25).
 
@@ -43,7 +43,7 @@ All values with their valid time are rows of one table per attribute (`Entity.At
 - Read history: one range scan.
 - Space: one row per value, nothing duplicated.
 
-Tursiops layout: `HistoryTable`, currently the only layout for `@history` (E-28).
+Tursiops layout: `HistoryTable`. For the prototype, sleep chooses between H1 and H2 (E-30).
 
 Comparable: MariaDB stores system-versioned history in the same table as current data unless partitioned; its documentation notes that this slows down queries on current data. Source: [MariaDB, System-Versioned Tables](https://mariadb.com/docs/server/reference/sql-structure/temporal-tables/system-versioned-tables).
 
@@ -59,6 +59,8 @@ The value with the latest valid time is a column in the entity table, older valu
 
 Comparable: SQL Server implements system-versioned temporal tables as a pair of a current table and a history table, per row instead of per attribute. Datomic keeps separate indexes for the current state and for history. Sources: [SQL Server temporal tables](https://learn.microsoft.com/en-us/sql/relational-databases/tables/temporal-tables), [Datomic indexes](https://docs.datomic.com/query/indexes.html).
 
+For the prototype, sleep chooses between H1 and H2 (E-30).
+
 Difference to these systems: they version by transaction time, which only grows. Tursiops uses valid time and accepts late-arriving older values (E-27), hence the extra case for writes.
 
 ### Partition current and history
@@ -73,7 +75,7 @@ Each value stores when it started to be valid. It ends where the next value star
 
 Comparable: historized attributes in Anchor Modeling store only the start of the interval (`ChangedAt`), one table per attribute in sixth normal form. Source: [Anchor Modeling](https://www.anchormodeling.com/) (overview: [Wikipedia](https://en.wikipedia.org/wiki/Anchor_modeling)).
 
-Tursiops stores start times only (E-27).
+Tursiops stores start times only (E-27, E-30).
 
 ### Start and end time
 
