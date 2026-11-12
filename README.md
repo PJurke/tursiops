@@ -26,6 +26,8 @@ Redundant annotations such as `@time @time`, or `@time` next to `@history`, are 
 
 Example: [`examples/mensch.tur`](examples/mensch.tur)
 
+Full specification: [`docs/format.md`](docs/format.md)
+
 ## Layout
 
 | Path | Contents |
@@ -34,6 +36,7 @@ Example: [`examples/mensch.tur`](examples/mensch.tur)
 | `src/Tursiops.Cli` | Command line, e.g. to trigger sleep and play the demo scenario |
 | `tests/Tursiops.Tests` | Tests (xUnit) |
 | `examples` | Example ontologies |
+| `docs` | Developer documentation, e.g. the format specification |
 
 ## Build
 
