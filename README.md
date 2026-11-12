@@ -1,16 +1,16 @@
 # Tursiops
 
-Eine Datenbank, die sich selbst organisiert. Der Admin beschreibt die Welt in Konzepten, Tursiops entscheidet über Strukturen und Optimierung.
+A database that organizes itself. The admin describes the world in concepts; Tursiops decides on structures and optimization.
 
-Der Name kommt vom Großen Tümmler (*Tursiops truncatus*). Delfine schlafen mit einer Gehirnhälfte, und wie sie soll Tursiops in Ruhephasen über seine eigene Organisation entscheiden.
+The name comes from the common bottlenose dolphin (*Tursiops truncatus*). Dolphins sleep with one half of their brain at a time, and like them, Tursiops is meant to decide on its own organization during rest phases.
 
-## Stand
+## Status
 
-Erster Prototyp in Arbeit. Er zeigt ein einziges Konzept, Zeit: Ein Attribut ist als zeitlich veränderlich beschrieben, Tursiops beobachtet die Daten und baut im Schlaf von „nur aktueller Wert" auf „Wert mit Historie" um, wenn die Daten es nahelegen. Jede Entscheidung steht in einem lesbaren Log.
+First prototype in progress. It demonstrates a single concept, time: an attribute is described as changing over time, Tursiops observes the data and, during sleep, rebuilds it from "current value only" to "value with history" when the data suggests it. Every decision is recorded in a readable log.
 
-## Ontologie-Format (v0.1)
+## Ontology format (v0.1)
 
-Dateien enden auf `.tur`:
+Files end with `.tur`:
 
 ```
 Mensch {
@@ -19,20 +19,22 @@ Mensch {
 }
 ```
 
-Beispiel: [`examples/mensch.tur`](examples/mensch.tur)
+Entity and attribute names are free to choose, in any language; keywords and annotations such as `@time` are English.
 
-## Aufbau
+Example: [`examples/mensch.tur`](examples/mensch.tur)
 
-| Pfad | Inhalt |
+## Layout
+
+| Path | Contents |
 |---|---|
-| `src/Tursiops.Core` | Kern: Parser für `.tur`, eigene Strukturbegriffe, Übersetzung nach SQLite, Beobachtung, Schlaf |
-| `src/Tursiops.Cli` | Kommandozeile, etwa um den Schlaf auszulösen und das Demo-Szenario abzuspielen |
+| `src/Tursiops.Core` | Core: parser for `.tur`, Tursiops' own structure model, translation to SQLite, observation, sleep |
+| `src/Tursiops.Cli` | Command line, e.g. to trigger sleep and play the demo scenario |
 | `tests/Tursiops.Tests` | Tests (xUnit) |
-| `examples` | Beispiel-Ontologien |
+| `examples` | Example ontologies |
 
-## Bauen
+## Build
 
-Voraussetzung: .NET 10 SDK.
+Requires the .NET 10 SDK.
 
 ```
 dotnet build
