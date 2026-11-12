@@ -1,0 +1,5 @@
+// Beispiel-Ontologie für den ersten Prototyp (E-02, E-12)
+Mensch {
+  Name
+  Körpergröße @time
+}

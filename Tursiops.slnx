@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Tursiops.Cli/Tursiops.Cli.csproj" />
+    <Project Path="src/Tursiops.Core/Tursiops.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Tursiops.Tests/Tursiops.Tests.csproj" />
+  </Folder>
+</Solution>
