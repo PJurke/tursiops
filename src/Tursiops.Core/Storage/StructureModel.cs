@@ -6,7 +6,7 @@ namespace Tursiops.Core.Storage;
 // Says nothing about tables; the translator for a target system decides that.
 // The user decides what information exists (AttributeTime), Tursiops decides how it is stored (E-25).
 
-/// <summary>How the values of an attribute are stored (ablageformen.md).</summary>
+/// <summary>How the values of an attribute are stored (docs/storage.md, docs/concepts/time.md).</summary>
 public enum AttributeLayout
 {
     /// <summary>The value as a column of the entity. For attributes without annotation.</summary>
@@ -20,6 +20,12 @@ public enum AttributeLayout
     /// For attributes with <c>@history</c>.
     /// </summary>
     HistoryTable,
+
+    /// <summary>
+    /// H1: the value with the latest valid time as columns of the entity, older values in a history table.
+    /// For attributes with <c>@history</c>.
+    /// </summary>
+    CurrentColumnAndHistoryTable,
 }
 
 /// <summary>Which layouts can hold which information (E-25). A layout never changes the information.</summary>
@@ -30,8 +36,8 @@ public static class AttributeLayouts
     {
         AttributeTime.Timeless => [AttributeLayout.Column],
         AttributeTime.CurrentOnly => [AttributeLayout.ColumnWithTime],
-        // Provisional until the research on history layouts (board card 05) decides on the forms.
-        AttributeTime.History => [AttributeLayout.HistoryTable],
+        // E-30: sleep chooses between H2 and H1 by usage.
+        AttributeTime.History => [AttributeLayout.HistoryTable, AttributeLayout.CurrentColumnAndHistoryTable],
         _ => throw new ArgumentOutOfRangeException(nameof(time), time, null),
     };
 }

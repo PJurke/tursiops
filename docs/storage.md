@@ -36,7 +36,21 @@ Value columns have no declared type. SQLite keeps the type of each value as it w
 |---|---|---|
 | `Column` | no annotation | Column `<Attribute>` in the entity table. Writing replaces the value. |
 | `ColumnWithTime` | `@time` | Columns `<Attribute>`, `<Attribute>._valid_at` and `<Attribute>._valid_offset` in the entity table. A write only replaces the value if its valid time is not older than the stored one. |
-| `HistoryTable` (H2) | `@history` | Table `<Entity>.<Attribute>` with `_entity` (references `_id`), `<Attribute>`, `_valid_at` and `_valid_offset`, plus index `<Entity>.<Attribute>._by_time` on `(_entity, _valid_at)`. Every write adds a row. The current value is the row with the latest valid time. |
+| `HistoryTable` (H2) | `@history` | History table `<Entity>.<Attribute>` (see below). Every write adds a row. The current value is the row with the latest valid time. Initial layout for `@history`. |
+| `CurrentColumnAndHistoryTable` (H1) | `@history` | Columns as in `ColumnWithTime` for the value with the latest valid time, older values in the history table. A write that is not older than the current value moves the current value into the history table and takes its place. An older value that arrives late goes straight into the history table. |
+
+The history table `<Entity>.<Attribute>` has the columns `_entity` (references `_id`), `<Attribute>`, `_valid_at` and `_valid_offset`, plus index `<Entity>.<Attribute>._by_time` on `(_entity, _valid_at)`.
+
+Among values with the same valid time, the one written last is the current one, in H1 and H2 alike. In the history table, rows with the same valid time keep their write order (`rowid`).
+
+## Changing the layout
+
+`SqliteStore.ChangeLayout` changes the layout of one attribute. Tables and catalog change in one transaction. Every value, its valid time and the current value read the same before and after (E-25).
+
+| From | To | Steps |
+|---|---|---|
+| H2 | H1 | Add the three columns to the entity table, copy the latest row per entity into them, delete that row from the history table. |
+| H1 | H2 | Insert the current values into the history table, drop the three columns. The inserted rows get the highest `rowid`, so they stay the ones written last among equal valid times. |
 
 Known methods for time-dependent attributes and their status: [`concepts/time.md`](concepts/time.md).
 

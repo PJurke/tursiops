@@ -15,7 +15,7 @@ Status on SQLite: ✓ implemented, ○ possible, not implemented yet, ✗ not po
 | [Value column](#value-column) | where the current value lives | timeless attributes | ✓ |
 | [Value column with time](#value-column-with-time) | where the current value lives | `@time`: current state only | ✓ |
 | [History table only (H2)](#history-table-only-h2) | where the current value lives | write-heavy attributes, reading history | ✓ |
-| [Current value in entity row (H1)](#current-value-in-entity-row-h1) | where the current value lives | reading current values of many entities | ○ |
+| [Current value in entity row (H1)](#current-value-in-entity-row-h1) | where the current value lives | reading current values of many entities | ✓ |
 | [Partition current and history](#partition-current-and-history) | where the current value lives | separating current from past inside one table | ✗ |
 | [Start time only](#start-time-only) | time representation | late-arriving values, cheap writes | ✓ |
 | [Start and end time](#start-and-end-time) | time representation | reading the value at a point in time | ○ |
@@ -59,7 +59,7 @@ The value with the latest valid time is a column in the entity table, older valu
 
 Comparable: SQL Server implements system-versioned temporal tables as a pair of a current table and a history table, per row instead of per attribute. Datomic keeps separate indexes for the current state and for history. Sources: [SQL Server temporal tables](https://learn.microsoft.com/en-us/sql/relational-databases/tables/temporal-tables), [Datomic indexes](https://docs.datomic.com/query/indexes.html).
 
-For the prototype, sleep chooses between H1 and H2 (E-30).
+Tursiops layout: `CurrentColumnAndHistoryTable`. For the prototype, sleep chooses between H1 and H2 (E-30).
 
 Difference to these systems: they version by transaction time, which only grows. Tursiops uses valid time and accepts late-arriving older values (E-27), hence the extra case for writes.
 
