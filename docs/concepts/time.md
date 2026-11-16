@@ -4,7 +4,7 @@ Known methods for storing time-dependent attributes, and how far Tursiops implem
 
 What the user declares decides the content (no annotation, `@time`, `@history`). The methods below only decide how that content is stored. A change of method never changes the information (E-25).
 
-Cost notes are first estimates from the sources and from reasoning, not measurements.
+Cost notes are first estimates from the sources and from reasoning. Where they have been measured, the results are in [Measurements on SQLite](#measurements-on-sqlite).
 
 ## Overview
 
@@ -53,7 +53,7 @@ The value with the latest valid time is a column in the entity table, older valu
 
 - Write, newer than current: move the current value to the history table, write the new one into the row (two writes).
 - Write, older than current (late arrival): one insert into the history table.
-- Read current, one or many entities: read the entity table, no history involved. This is where H1 pays off.
+- Read current: read the entity table, no history involved. This is where H1 pays off, but only for many entities; for one entity H2 is as fast (measured).
 - Read history: entity row plus history table.
 - Space: as H2.
 
@@ -94,6 +94,28 @@ The history table is declared `WITHOUT ROWID` with primary key `(_entity, _valid
 ### Time-split B-tree
 
 An index structure that splits nodes by time as well as by key and moves superseded versions to separate, append-only storage. Not available in SQLite. Sources: [Salzberg, Tsotras: Comparison of Access Methods for Time-Evolving Data (1999)](https://www.vislab.ucr.edu/IGERT/papers/temporal-index-survey.pdf), [Salzberg et al.: A Framework for Access Methods for Versioned Data (2004)](https://www.microsoft.com/en-us/research/?p=155695).
+
+## Measurements on SQLite
+
+H1 and H2 measured with [`tools/Tursiops.Bench`](../../tools/Tursiops.Bench) on 2026-11-16: SQLite in a file, one attribute with `@history`, 10 values per entity, four runs on a Linux x64 machine. This is not the target hardware, so only the ratios between H1 and H2 matter. Ranges cover all four runs.
+
+| Operation | H2 | H1 | Result |
+|---|---|---|---|
+| Write newer value (one transaction per write) | 0.8 to 1.6 ms | 0.9 to 1.8 ms | H1 8 to 15 % slower in every run |
+| Write late older value | 0.8 to 1.7 ms | 1.0 to 1.7 ms | H1 equal to 45 % slower, noisy |
+| Read current, one entity | 13 to 20 µs | 12 to 17 µs | no consistent difference |
+| Read history, one entity | 24 to 38 µs | 33 to 46 µs | H1 tends to be slower, noisy |
+| Read current, all of 10,000 entities | 6.7 to 9.3 ms | 1.5 to 2.3 ms | H1 3.6 to 5 times faster |
+| Read current, all of 100,000 entities | 74 to 87 ms | 21 to 23 ms | H1 3.2 to 4.2 times faster |
+| Change H2 to H1, 100,000 entities with 1 million values | | | 0.5 to 0.6 s |
+
+Reading current values of all entities is not an operation of the translation layer yet (E-26); the benchmark reads with SQL directly.
+
+What the numbers say:
+
+- H1 only pays off when current values of many entities are read. For a single entity the index lookup of H2 is as fast.
+- The write advantage of H2 is small on SQLite: most of the time of a write is spent committing its transaction, the second write of H1 adds little.
+- A layout change is cheap enough to run during sleep even for large histories.
 
 ## Related, not yet covered
 

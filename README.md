@@ -35,6 +35,7 @@ Full specification: [`docs/format.md`](docs/format.md)
 | `src/Tursiops.Core` | Core: parser for `.tur`, Tursiops' own structure model, translation to SQLite, observation, sleep |
 | `src/Tursiops.Cli` | Command line, e.g. to trigger sleep and play the demo scenario |
 | `tests/Tursiops.Tests` | Tests (xUnit) |
+| `tools/Tursiops.Bench` | Benchmark of storage layouts on SQLite (results in `docs/concepts/time.md`) |
 | `examples` | Example ontologies |
 | `docs` | Developer documentation: format specification, storage layout, known methods per concept (`docs/concepts`) |
 
@@ -46,4 +47,10 @@ Requires the .NET 10 SDK.
 dotnet build
 dotnet test
 dotnet run --project src/Tursiops.Cli
+```
+
+Benchmark of the `@history` layouts:
+
+```
+dotnet run -c Release --project tools/Tursiops.Bench
 ```
