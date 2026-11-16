@@ -13,12 +13,14 @@ public sealed class SqliteStore : IDisposable
     private readonly SqliteConnection _connection;
     private readonly TimeProvider _time;
     private SqliteTransaction? _transaction;
+    private readonly PendingObservations _pending = new();
 
-    private SqliteStore(SqliteConnection connection, StructureModel structure, TimeProvider time)
+    private SqliteStore(SqliteConnection connection, StructureModel structure, TimeProvider time, long phase)
     {
         _connection = connection;
         _time = time;
         Structure = structure;
+        Phase = phase;
     }
 
     /// <summary>The current storage decisions, as recorded in the database file.</summary>
@@ -37,13 +39,15 @@ public sealed class SqliteStore : IDisposable
             if (TableExists(connection, StructureTable))
                 throw new InvalidOperationException($"'{path}' already contains a Tursiops database.");
 
+            time ??= TimeProvider.System;
             using var transaction = connection.BeginTransaction();
             CreateCatalog(connection, transaction, structure);
             foreach (var entity in structure.Entities)
                 CreateEntityTables(connection, transaction, entity);
+            var phase = PrepareObservations(connection, transaction, time);
             transaction.Commit();
 
-            return new SqliteStore(connection, structure, time ?? TimeProvider.System);
+            return new SqliteStore(connection, structure, time, phase);
         }
         catch
         {
@@ -62,7 +66,12 @@ public sealed class SqliteStore : IDisposable
             if (!TableExists(connection, StructureTable))
                 throw new InvalidOperationException($"'{path}' is not a Tursiops database.");
 
-            return new SqliteStore(connection, LoadCatalog(connection), time ?? TimeProvider.System);
+            time ??= TimeProvider.System;
+            using var transaction = connection.BeginTransaction();
+            var phase = PrepareObservations(connection, transaction, time);
+            transaction.Commit();
+
+            return new SqliteStore(connection, LoadCatalog(connection), time, phase);
         }
         catch
         {
@@ -71,7 +80,18 @@ public sealed class SqliteStore : IDisposable
         }
     }
 
-    public void Dispose() => _connection.Dispose();
+    /// <summary>Writes pending observations to the file (E-32) and closes the database.</summary>
+    public void Dispose()
+    {
+        try
+        {
+            FlushObservations();
+        }
+        finally
+        {
+            _connection.Dispose();
+        }
+    }
 
     // ---------- Operations (E-26) ----------
 
@@ -91,10 +111,13 @@ public sealed class SqliteStore : IDisposable
             throw new ArgumentException(
                 $"'{entity.Entity}.{attribute}' is {StructureModel.Describe(target.Time)}, so its value needs a time. " +
                 "Pass ValueTime.Now or ValueTime.At(...).", nameof(attribute));
+        var type = TechnicalTypes.Of(value);
 
         Execute(
             $"UPDATE {Quote(EntityTable(entity.Entity))} SET {Quote(attribute)} = $value WHERE {Quote(IdColumn)} = $id",
             ("$value", value), ("$id", entity.Id));
+
+        ObserveWrite(entity.Entity, attribute, type, late: false);
     }
 
     /// <summary>
@@ -107,24 +130,32 @@ public sealed class SqliteStore : IDisposable
         if (target.Time == AttributeTime.Timeless)
             throw new ArgumentException(
                 $"'{entity.Entity}.{attribute}' is {StructureModel.Describe(target.Time)}, so its value takes no time.", nameof(time));
+        var type = TechnicalTypes.Of(value);
 
         var validAt = time.Resolve(_time);
         var utc = ToSortableUtc(validAt);
         var offset = ToOffsetMinutes(validAt);
+        bool late;
 
         switch (target.Layout)
         {
             case AttributeLayout.HistoryTable:
+                // Late means older than the current value, i.e. some stored value is newer (E-31).
+                late = Scalar(
+                    $"SELECT 1 FROM {Quote(HistoryTable(entity.Entity, attribute))} " +
+                    $"WHERE {Quote(EntityColumn)} = $id AND {Quote(ValidAtColumn)} > $validAt LIMIT 1",
+                    ("$id", entity.Id), ("$validAt", utc)) is not null;
                 InsertIntoHistory(entity, attribute, value, utc, offset);
                 break;
 
             case AttributeLayout.ColumnWithTime:
-                ReplaceCurrentIfNotOlder(entity, attribute, value, utc, offset);
+                late = !ReplaceCurrentIfNotOlder(entity, attribute, value, utc, offset);
                 break;
 
             case AttributeLayout.CurrentColumnAndHistoryTable:
                 // H1: a value that is not older than the current one becomes current and pushes the old one
                 // into the history table; an older value that arrives late goes straight into the history table.
+                var replaced = false;
                 InTransaction(() =>
                 {
                     var validAtColumn = Quote(CurrentValidAtColumn(attribute));
@@ -135,14 +166,18 @@ public sealed class SqliteStore : IDisposable
                         $"FROM {Quote(EntityTable(entity.Entity))} " +
                         $"WHERE {Quote(IdColumn)} = $id AND {validAtColumn} IS NOT NULL AND {validAtColumn} <= $validAt",
                         ("$id", entity.Id), ("$validAt", utc));
-                    if (!ReplaceCurrentIfNotOlder(entity, attribute, value, utc, offset))
+                    replaced = ReplaceCurrentIfNotOlder(entity, attribute, value, utc, offset);
+                    if (!replaced)
                         InsertIntoHistory(entity, attribute, value, utc, offset);
                 });
+                late = !replaced;
                 break;
 
             default:
                 throw new InvalidOperationException($"Layout {target.Layout} cannot hold a timed value.");
         }
+
+        ObserveWrite(entity.Entity, attribute, type, late);
     }
 
     private void InsertIntoHistory(EntityRef entity, string attribute, object? value, string utc, long offset) =>
@@ -177,12 +212,14 @@ public sealed class SqliteStore : IDisposable
             var value = Scalar(
                 $"SELECT {Quote(attribute)} FROM {Quote(EntityTable(entity.Entity))} WHERE {Quote(IdColumn)} = $id",
                 ("$id", entity.Id));
+            Observe(entity.Entity, attribute, Counter.ReadCurrent);
             return value is null or DBNull ? null : new StoredValue(value, null);
         }
 
         var latest = target.Layout == AttributeLayout.HistoryTable
             ? ReadHistory(entity, attribute, newestFirst: true, limit: 1)
             : ReadCurrentTimed(entity, attribute);
+        Observe(entity.Entity, attribute, Counter.ReadCurrent);
         return latest.Count == 0 ? null : new StoredValue(latest[0].Value, latest[0].ValidAt);
     }
 
@@ -198,12 +235,133 @@ public sealed class SqliteStore : IDisposable
                 $"'{entity.Entity}.{attribute}' is {StructureModel.Describe(target.Time)}, so it keeps no history. " +
                 "Mark it with @history in the ontology if its history is needed.", nameof(attribute));
 
-        return target.Layout switch
+        var history = target.Layout switch
         {
             AttributeLayout.HistoryTable => ReadHistory(entity, attribute, newestFirst: false, limit: null),
             AttributeLayout.CurrentColumnAndHistoryTable => ReadSplitHistory(entity, attribute),
             _ => throw new InvalidOperationException($"Layout {target.Layout} cannot hold a history."),
         };
+        Observe(entity.Entity, attribute, Counter.ReadHistory);
+        return history;
+    }
+
+    // ---------- Observation (E-31, E-32) ----------
+
+    /// <summary>The current waking phase: from one sleep to the next. The first phase is 1.</summary>
+    public long Phase { get; private set; }
+
+    /// <summary>When a phase began.</summary>
+    /// <exception cref="ArgumentException">There is no such phase.</exception>
+    public DateTimeOffset PhaseStartedAt(long phase)
+    {
+        using var command = Command(
+            $"SELECT started_at, started_offset FROM {Quote(PhasesTable)} WHERE phase = $phase", ("$phase", phase));
+        using var reader = command.ExecuteReader();
+        if (!reader.Read())
+            throw new ArgumentException($"There is no phase {phase}.", nameof(phase));
+        return FromStored(reader.GetString(0), reader.GetInt64(1));
+    }
+
+    /// <summary>
+    /// How an attribute was used in a phase, by default the current one.
+    /// For the current phase this includes counts not yet written to the file.
+    /// </summary>
+    /// <exception cref="ArgumentException">Unknown entity or attribute.</exception>
+    public AttributeObservations GetObservations(string entity, string attribute, long? phase = null)
+    {
+        Structure.Entity(entity).Attribute(attribute);
+        var which = phase ?? Phase;
+
+        var counts = new Dictionary<Counter, long>();
+        using (var command = Command(
+            $"SELECT counter, count FROM {Quote(ObservationsTable)} " +
+            "WHERE phase = $phase AND entity = $entity AND attribute = $attribute",
+            ("$phase", which), ("$entity", entity), ("$attribute", attribute)))
+        using (var reader = command.ExecuteReader())
+        {
+            var byName = Enum.GetValues<Counter>().ToDictionary(Counters.Name);
+            while (reader.Read())
+                if (byName.TryGetValue(reader.GetString(0), out var counter))
+                    counts[counter] = reader.GetInt64(1);
+        }
+
+        if (which == Phase)
+            foreach (var counter in Enum.GetValues<Counter>())
+                counts[counter] = counts.GetValueOrDefault(counter) + _pending.Get(entity, attribute, counter);
+
+        return AttributeObservations.From(counts);
+    }
+
+    /// <summary>Writes the counts kept in memory to the file (E-32). Called on closing and before each sleep.</summary>
+    public void FlushObservations()
+    {
+        if (_pending.IsEmpty)
+            return;
+
+        InTransaction(() =>
+        {
+            foreach (var (entity, attribute, counter, count) in _pending.All())
+                Execute(
+                    $"INSERT INTO {Quote(ObservationsTable)} (phase, entity, attribute, counter, count) " +
+                    "VALUES ($phase, $entity, $attribute, $counter, $count) " +
+                    "ON CONFLICT (phase, entity, attribute, counter) DO UPDATE SET count = count + excluded.count",
+                    ("$phase", Phase), ("$entity", entity), ("$attribute", attribute),
+                    ("$counter", Counters.Name(counter)), ("$count", count));
+        });
+        _pending.Clear();
+    }
+
+    /// <summary>
+    /// Ends the current phase and begins a new one with all counts at zero. The sleep calls this (E-31).
+    /// Earlier phases are kept.
+    /// </summary>
+    /// <returns>The number of the new phase.</returns>
+    public long StartNewPhase()
+    {
+        FlushObservations();
+        var next = Phase + 1;
+        var now = _time.GetUtcNow();
+        Execute(
+            $"INSERT INTO {Quote(PhasesTable)} (phase, started_at, started_offset) VALUES ($phase, $at, $offset)",
+            ("$phase", next), ("$at", ToSortableUtc(now)), ("$offset", ToOffsetMinutes(now)));
+        Phase = next;
+        return next;
+    }
+
+    private void Observe(string entity, string attribute, Counter counter) => _pending.Add(entity, attribute, counter);
+
+    private void ObserveWrite(string entity, string attribute, TechnicalType? type, bool late)
+    {
+        Observe(entity, attribute, Counter.Write);
+        if (late)
+            Observe(entity, attribute, Counter.LateWrite);
+        if (type is { } t)
+            Observe(entity, attribute, Counters.For(t));
+    }
+
+    // Creates the observation tables if missing (also for files from before E-31) and returns the current phase.
+    private static long PrepareObservations(SqliteConnection connection, SqliteTransaction transaction, TimeProvider time)
+    {
+        Execute(connection, transaction,
+            $"CREATE TABLE IF NOT EXISTS {Quote(PhasesTable)} (" +
+            "phase INTEGER PRIMARY KEY, started_at TEXT NOT NULL, started_offset INTEGER NOT NULL)");
+        Execute(connection, transaction,
+            $"CREATE TABLE IF NOT EXISTS {Quote(ObservationsTable)} (" +
+            "phase INTEGER NOT NULL REFERENCES " + Quote(PhasesTable) + " (phase), " +
+            "entity TEXT NOT NULL, attribute TEXT NOT NULL, counter TEXT NOT NULL, count INTEGER NOT NULL, " +
+            "PRIMARY KEY (phase, entity, attribute, counter))");
+
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"SELECT max(phase) FROM {Quote(PhasesTable)}";
+        if (command.ExecuteScalar() is long phase)
+            return phase;
+
+        var now = time.GetUtcNow();
+        Execute(connection, transaction,
+            $"INSERT INTO {Quote(PhasesTable)} (phase, started_at, started_offset) VALUES (1, $at, $offset)",
+            ("$at", ToSortableUtc(now)), ("$offset", ToOffsetMinutes(now)));
+        return 1;
     }
 
     // ---------- Changing the layout ----------
