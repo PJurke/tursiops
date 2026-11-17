@@ -330,6 +330,33 @@ public class ObservationTests : IDisposable
         Assert.Equal(before, store.GetObservations("Mensch", "Körpergröße"));
     }
 
+    [Theory] // test 13: reading current values of all entities counts once per call, apart from single reads (E-31, E-33)
+    [InlineData(H1)]
+    [InlineData(H2)]
+    public void ReadingCurrentValuesOfAllEntities_IsCountedOncePerCall(AttributeLayout layout)
+    {
+        var path = TempFile();
+        using (var store = SqliteStore.Create(path, Model(layout), new FixedTimeProvider(Now)))
+        {
+            var anna = store.CreateEntity("Mensch");
+            var ben = store.CreateEntity("Mensch");
+            store.SetValue(anna, "Körpergröße", 155L, ValueTime.At(Age12));
+            store.SetValue(ben, "Körpergröße", 150L, ValueTime.At(Age12));
+
+            store.GetCurrentValues("Mensch", "Körpergröße");
+            store.GetCurrentValues("Mensch", "Körpergröße");
+
+            var observed = store.GetObservations("Mensch", "Körpergröße");
+            Assert.Equal(2, observed.AllCurrentReads);
+            Assert.Equal(0, observed.CurrentReads);
+        }
+
+        using (var store = SqliteStore.Open(path))
+            Assert.Equal(2, store.GetObservations("Mensch", "Körpergröße").AllCurrentReads);
+        Assert.Equal(2L, Scalar(path,
+            "SELECT count FROM _tursiops_observations WHERE attribute = 'Körpergröße' AND counter = 'read_current_all'"));
+    }
+
     // ---------- Helpers ----------
 
     private static StructureModel Model(AttributeLayout history) =>

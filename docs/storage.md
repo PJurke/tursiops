@@ -1,6 +1,6 @@
 # Storage in SQLite
 
-How the translation layer in `src/Tursiops.Core/Storage/Sqlite` lays out a Tursiops database in SQLite. The reasons behind it are recorded in the project's decision log (E-06, E-13, E-21, E-23, E-25 to E-30).
+How the translation layer in `src/Tursiops.Core/Storage/Sqlite` lays out a Tursiops database in SQLite. The reasons behind it are recorded in the project's decision log (E-06, E-13, E-21, E-23, E-25 to E-33).
 
 Only the translation layer knows tables and SQL. Everything else works with entities, attributes and storage layouts. Which layouts exist for which attribute is described in `StructureModel.cs`.
 
@@ -45,6 +45,17 @@ The history table `<Entity>.<Attribute>` has the columns `_entity` (references `
 
 Among values with the same valid time, the one written last is the current one, in H1 and H2 alike. In the history table, rows with the same valid time keep their write order (`rowid`).
 
+## Reading current values of all entities
+
+`SqliteStore.GetCurrentValues` reads the current value of one attribute for all entities that have one, ordered by `_id`, i.e. in the order the entities were created (E-33). Each value is the one `GetCurrentValue` returns for that entity. Entities without a value are left out; for an attribute with `@time` or `@history`, a `null` set with a valid time is a value and is included.
+
+| Layout | Read |
+|---|---|
+| `Column`, `ColumnWithTime`, H1 | the entity table, rows where the value (or its valid time) is set |
+| H2 | per entity, the history row with the latest valid time (the last written among equal times), found through the index on `(_entity, _valid_at)` |
+
+This is the operation in which H1 is faster than H2 (see [`concepts/time.md`](concepts/time.md)).
+
 ## Changing the layout
 
 `SqliteStore.ChangeLayout` changes the layout of one attribute. Tables and catalog change in one transaction. Every value, its valid time and the current value read the same before and after (E-25).
@@ -65,6 +76,7 @@ Tursiops counts per attribute how it is used, without changing anything. The sle
 | `write` | a value is set |
 | `late_write` | a value is set that is older than the current value (only with `@time` or `@history`; the same valid time is not older) |
 | `read_current` | the current value of one entity is read |
+| `read_current_all` | the current values of all entities are read; counted once per read, not per entity |
 | `read_history` | the history of one entity is read |
 | `type_number`, `type_text`, `type_date`, `type_boolean` | a value of that technical type is set; `null` has no type. Text stays text, even if it looks like a number |
 

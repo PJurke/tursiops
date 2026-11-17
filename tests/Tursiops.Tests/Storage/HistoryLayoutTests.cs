@@ -191,7 +191,7 @@ public class HistoryLayoutTests : IDisposable
     }
 
     [Fact]
-    public void ChangeLayout_IsRecordedInTheFile() // E-26
+    public void ChangeLayout_IsRecordedInTheFile() // E-33
     {
         var path = TempFile();
         List<EntityRef> people;

@@ -40,6 +40,7 @@ internal enum Counter
     Write,
     LateWrite,
     ReadCurrent,
+    ReadCurrentAll,
     ReadHistory,
     TypeNumber,
     TypeText,
@@ -54,6 +55,7 @@ internal static class Counters
         Counter.Write => "write",
         Counter.LateWrite => "late_write",
         Counter.ReadCurrent => "read_current",
+        Counter.ReadCurrentAll => "read_current_all",
         Counter.ReadHistory => "read_history",
         Counter.TypeNumber => "type_number",
         Counter.TypeText => "type_text",
@@ -76,6 +78,7 @@ internal static class Counters
 /// <param name="Writes">Values set, including late ones.</param>
 /// <param name="LateWrites">Values set that were older than the current value (only with <c>@time</c> or <c>@history</c>).</param>
 /// <param name="CurrentReads">Current value read for one entity.</param>
+/// <param name="AllCurrentReads">Current values read for all entities at once, counted once per read (E-33).</param>
 /// <param name="HistoryReads">History read for one entity.</param>
 /// <param name="Numbers">Values set that were numbers.</param>
 /// <param name="Texts">Values set that were text.</param>
@@ -85,6 +88,7 @@ public sealed record AttributeObservations(
     long Writes,
     long LateWrites,
     long CurrentReads,
+    long AllCurrentReads,
     long HistoryReads,
     long Numbers,
     long Texts,
@@ -92,13 +96,13 @@ public sealed record AttributeObservations(
     long Booleans)
 {
     /// <summary>Nothing observed.</summary>
-    public static AttributeObservations None { get; } = new(0, 0, 0, 0, 0, 0, 0, 0);
+    public static AttributeObservations None { get; } = new(0, 0, 0, 0, 0, 0, 0, 0, 0);
 
     internal static AttributeObservations From(IReadOnlyDictionary<Counter, long> counts)
     {
         long Get(Counter counter) => counts.GetValueOrDefault(counter);
         return new(
-            Get(Counter.Write), Get(Counter.LateWrite), Get(Counter.ReadCurrent), Get(Counter.ReadHistory),
+            Get(Counter.Write), Get(Counter.LateWrite), Get(Counter.ReadCurrent), Get(Counter.ReadCurrentAll), Get(Counter.ReadHistory),
             Get(Counter.TypeNumber), Get(Counter.TypeText), Get(Counter.TypeDate), Get(Counter.TypeBoolean));
     }
 }

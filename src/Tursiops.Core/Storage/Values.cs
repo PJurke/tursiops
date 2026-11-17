@@ -6,6 +6,9 @@ public readonly record struct EntityRef(string Entity, long Id);
 /// <summary>The current value of an attribute. <see cref="ValidAt"/> is set for attributes with <c>@time</c> or <c>@history</c>.</summary>
 public sealed record StoredValue(object? Value, DateTimeOffset? ValidAt);
 
+/// <summary>The current value of an attribute for one entity, as read for all entities at once (E-33).</summary>
+public sealed record EntityValue(EntityRef Entity, StoredValue Value);
+
 /// <summary>A value of a time-dependent attribute and the time it was valid.</summary>
 public sealed record TimedValue(object? Value, DateTimeOffset ValidAt);
 

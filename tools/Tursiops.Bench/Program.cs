@@ -59,8 +59,8 @@ for (int round = 0; round < 2; round++)
     }
 }
 
-// Part 2: the current value of all entities. There is no such operation yet (E-26),
-// so this part reads with SQL directly. Data is bulk-loaded in one transaction.
+// Part 2: the current value of all entities, read with SqliteStore.GetCurrentValues (E-33).
+// Data is bulk-loaded in one transaction.
 Console.WriteLine();
 Console.WriteLine($"Part 2: current value of all entities, {valuesPerEntity} values each, best of 5");
 
@@ -70,16 +70,14 @@ foreach (var n in new[] { 10_000, 100_000 })
     using (SqliteStore.Create(path, model)) { }
     BulkLoad(path, n, valuesPerEntity);
 
-    var h2 = BestOfFive(path,
-        $"SELECT m._id, (SELECT h.\"{Attribute}\" FROM \"{Entity}.{Attribute}\" h WHERE h._entity = m._id " +
-        $"ORDER BY h._valid_at DESC, h.rowid DESC LIMIT 1) FROM \"{Entity}\" m");
+    var h2 = BestOfFive(path, n);
 
     var sw = Stopwatch.StartNew();
     using (var store = SqliteStore.Open(path))
         store.ChangeLayout(Entity, Attribute, AttributeLayout.CurrentColumnAndHistoryTable);
     var change = sw.Elapsed.TotalMilliseconds;
 
-    var h1 = BestOfFive(path, $"SELECT _id, \"{Attribute}\" FROM \"{Entity}\"");
+    var h1 = BestOfFive(path, n);
 
     Console.WriteLine($"{n,7} entities: H2 {h2,8:F1} ms  H1 {h1,8:F1} ms  H2/H1 {h2 / h1,4:F1}  (change H2 -> H1: {change:F0} ms)");
 }
@@ -123,20 +121,17 @@ void BulkLoad(string path, int n, int perEntity)
     transaction.Commit();
 }
 
-static double BestOfFive(string path, string sql)
+static double BestOfFive(string path, int expected)
 {
-    using var connection = new SqliteConnection($"Data Source={path};Pooling=False");
-    connection.Open();
-    var command = connection.CreateCommand();
-    command.CommandText = sql;
+    using var store = SqliteStore.Open(path);
     var best = double.MaxValue;
     for (int rep = 0; rep < 5; rep++)
     {
         var sw = Stopwatch.StartNew();
-        long sum = 0;
-        using (var reader = command.ExecuteReader())
-            while (reader.Read()) sum += reader.GetInt64(1);
+        var values = store.GetCurrentValues(Entity, Attribute);
         best = Math.Min(best, sw.Elapsed.TotalMilliseconds);
+        if (values.Count != expected)
+            throw new InvalidOperationException($"Expected {expected} values, read {values.Count}.");
     }
     return best;
 }

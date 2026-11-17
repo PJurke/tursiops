@@ -2,7 +2,7 @@ using Tursiops.Core.Format;
 
 namespace Tursiops.Core.Storage;
 
-// Tursiops' own structure terms (E-26): for each attribute, its storage layout.
+// Tursiops' own structure terms (E-33): for each attribute, its storage layout.
 // Says nothing about tables; the translator for a target system decides that.
 // The user decides what information exists (AttributeTime), Tursiops decides how it is stored (E-25).
 

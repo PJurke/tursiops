@@ -97,7 +97,7 @@ An index structure that splits nodes by time as well as by key and moves superse
 
 ## Measurements on SQLite
 
-H1 and H2 measured with [`tools/Tursiops.Bench`](../../tools/Tursiops.Bench) on 2026-11-16: SQLite in a file, one attribute with `@history`, 10 values per entity, four runs on a Linux x64 machine. This is not the target hardware, so only the ratios between H1 and H2 matter. Ranges cover all four runs.
+H1 and H2 measured with [`tools/Tursiops.Bench`](../../tools/Tursiops.Bench): SQLite in a file, one attribute with `@history`, 10 values per entity, on a Linux x64 machine. This is not the target hardware, so only the ratios between H1 and H2 matter. Ranges cover all runs: four on 2026-11-16 for writes, single reads and the layout change, three on 2026-11-17 for reading all entities.
 
 | Operation | H2 | H1 | Result |
 |---|---|---|---|
@@ -105,15 +105,16 @@ H1 and H2 measured with [`tools/Tursiops.Bench`](../../tools/Tursiops.Bench) on 
 | Write late older value | 0.8 to 1.7 ms | 1.0 to 1.7 ms | H1 equal to 45 % slower, noisy |
 | Read current, one entity | 13 to 20 µs | 12 to 17 µs | no consistent difference |
 | Read history, one entity | 24 to 38 µs | 33 to 46 µs | H1 tends to be slower, noisy |
-| Read current, all of 10,000 entities | 6.7 to 9.3 ms | 1.5 to 2.3 ms | H1 3.6 to 5 times faster |
-| Read current, all of 100,000 entities | 74 to 87 ms | 21 to 23 ms | H1 3.2 to 4.2 times faster |
+| Read current, all of 10,000 entities | 8.0 to 9.0 ms | 5.2 to 6.0 ms | H1 1.5 to 1.6 times faster |
+| Read current, all of 100,000 entities | 90 to 97 ms | 61 to 65 ms | H1 1.4 to 1.6 times faster |
 | Change H2 to H1, 100,000 entities with 1 million values | | | 0.5 to 0.6 s |
 
-Reading current values of all entities is not an operation of the translation layer yet (E-26); the benchmark reads with SQL directly.
+Reading all entities is measured through `SqliteStore.GetCurrentValues` (E-33), which returns every value with its valid time. A first run on 2026-11-16 read only id and value with SQL directly and found H1 3.2 to 5 times faster. The difference is the valid time: for 100,000 entities in H1, reading id and value takes about 11 ms, reading the valid time as text doubles that, and converting it to a date doubles it again. Most of what H1 costs here is handling valid times, while H2 spends its time finding the latest row per entity.
 
 What the numbers say:
 
-- H1 only pays off when current values of many entities are read. For a single entity the index lookup of H2 is as fast.
+- H1 only pays off when current values of many entities are read, and then needs about a third less time. For a single entity the index lookup of H2 is as fast.
+- Storing valid times as text is now the larger cost when reading many entities. A cheaper representation would mainly help H1.
 - The write advantage of H2 is small on SQLite: most of the time of a write is spent committing its transaction, the second write of H1 adds little.
 - A layout change is cheap enough to run during sleep even for large histories.
 

@@ -5,7 +5,7 @@ using static Tursiops.Core.Storage.Sqlite.SqliteNames;
 namespace Tursiops.Core.Storage.Sqlite;
 
 /// <summary>
-/// Translation layer to SQLite (E-06, E-26). Only this class knows tables and SQL;
+/// Translation layer to SQLite (E-06, E-33). Only this class knows tables and SQL;
 /// everyone else works with entities, attributes and the structure model.
 /// </summary>
 public sealed class SqliteStore : IDisposable
@@ -56,7 +56,7 @@ public sealed class SqliteStore : IDisposable
         }
     }
 
-    /// <summary>Opens an existing Tursiops database and restores its structure model (E-26).</summary>
+    /// <summary>Opens an existing Tursiops database and restores its structure model (E-33).</summary>
     /// <exception cref="InvalidOperationException">The file is not a Tursiops database.</exception>
     public static SqliteStore Open(string path, TimeProvider? time = null)
     {
@@ -93,7 +93,7 @@ public sealed class SqliteStore : IDisposable
         }
     }
 
-    // ---------- Operations (E-26) ----------
+    // ---------- Operations (E-33) ----------
 
     /// <summary>Creates a new entity, e.g. a person, and returns its reference.</summary>
     public EntityRef CreateEntity(string entity)
@@ -221,6 +221,54 @@ public sealed class SqliteStore : IDisposable
             : ReadCurrentTimed(entity, attribute);
         Observe(entity.Entity, attribute, Counter.ReadCurrent);
         return latest.Count == 0 ? null : new StoredValue(latest[0].Value, latest[0].ValidAt);
+    }
+
+    /// <summary>
+    /// Reads the current value of an attribute for all entities that have one, in the order they were created (E-33).
+    /// Each value is the one <see cref="GetCurrentValue"/> returns for that entity; entities without a value are left out.
+    /// </summary>
+    /// <exception cref="ArgumentException">Unknown entity or attribute.</exception>
+    public IReadOnlyList<EntityValue> GetCurrentValues(string entity, string attribute)
+    {
+        var target = Structure.Entity(entity).Attribute(attribute);
+        var table = Quote(EntityTable(entity));
+        var id = Quote(IdColumn);
+
+        var sql = target.Layout switch
+        {
+            AttributeLayout.Column =>
+                $"SELECT {id}, {Quote(attribute)} FROM {table} WHERE {Quote(attribute)} IS NOT NULL ORDER BY {id}",
+
+            AttributeLayout.ColumnWithTime or AttributeLayout.CurrentColumnAndHistoryTable =>
+                $"SELECT {id}, {Quote(attribute)}, {Quote(CurrentValidAtColumn(attribute))}, {Quote(CurrentValidOffsetColumn(attribute))} " +
+                $"FROM {table} WHERE {Quote(CurrentValidAtColumn(attribute))} IS NOT NULL ORDER BY {id}",
+
+            // H2: per entity the row with the latest valid time, the one written last among equal times.
+            AttributeLayout.HistoryTable =>
+                $"SELECT e.{id}, h.{Quote(attribute)}, h.{Quote(ValidAtColumn)}, h.{Quote(ValidOffsetColumn)} " +
+                $"FROM {table} AS e JOIN {Quote(HistoryTable(entity, attribute))} AS h ON h.rowid = " +
+                $"(SELECT l.rowid FROM {Quote(HistoryTable(entity, attribute))} AS l WHERE l.{Quote(EntityColumn)} = e.{id} " +
+                $"ORDER BY l.{Quote(ValidAtColumn)} DESC, l.rowid DESC LIMIT 1) " +
+                $"ORDER BY e.{id}",
+
+            _ => throw new InvalidOperationException($"Layout {target.Layout} is not known."),
+        };
+
+        var values = new List<EntityValue>();
+        using (var command = Command(sql))
+        using (var reader = command.ExecuteReader())
+        {
+            var timed = target.Layout != AttributeLayout.Column;
+            while (reader.Read())
+            {
+                var value = reader.IsDBNull(1) ? null : reader.GetValue(1);
+                var validAt = timed ? FromStored(reader.GetString(2), reader.GetInt64(3)) : (DateTimeOffset?)null;
+                values.Add(new EntityValue(new EntityRef(entity, reader.GetInt64(0)), new StoredValue(value, validAt)));
+            }
+        }
+
+        Observe(entity, attribute, Counter.ReadCurrentAll);
+        return values;
     }
 
     /// <summary>
@@ -369,7 +417,7 @@ public sealed class SqliteStore : IDisposable
     /// <summary>
     /// Changes how the values of one attribute are stored. The information stays the same (E-25):
     /// every value, its valid time and the current value read the same before and after.
-    /// Tables and structure model change in one transaction (E-26).
+    /// Tables and structure model change in one transaction (E-33).
     /// </summary>
     /// <exception cref="ArgumentException">
     /// Unknown entity or attribute, or a layout that cannot hold the attribute's information (E-25).

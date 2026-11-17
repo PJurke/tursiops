@@ -80,7 +80,7 @@ public class SqliteStoreTests : IDisposable
     }
 
     [Fact]
-    public void Open_RestoresStructureModelFromTheFile() // E-26
+    public void Open_RestoresStructureModelFromTheFile() // E-33
     {
         var path = TempFile();
         using (SqliteStore.Create(path, Model())) { }

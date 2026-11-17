@@ -2,7 +2,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Tursiops.Tests.Storage;
 
-// Verifies the SQLite behavior that decisions E-21 and E-26 rely on.
+// Verifies the SQLite behavior that decisions E-21 and E-33 rely on.
 // If one of these fails, the decision needs to be revisited, not the test.
 public class SqliteBehaviorTests
 {
@@ -19,7 +19,7 @@ public class SqliteBehaviorTests
     }
 
     [Fact]
-    public void SchemaChanges_AreRolledBackWithTheTransaction() // E-26
+    public void SchemaChanges_AreRolledBackWithTheTransaction() // E-33
     {
         using var connection = Open();
         Execute(connection, """CREATE TABLE "Mensch" ("_id" INTEGER PRIMARY KEY, "Körpergröße")""");
