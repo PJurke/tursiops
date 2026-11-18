@@ -1,0 +1,48 @@
+namespace Tursiops.Core.Sleep;
+
+// The sleep log (E-04, E-35): every decision in readable English, kept in the database file.
+
+/// <summary>What a log entry is about. The names are stored in the database file.</summary>
+public enum SleepLogKind
+{
+    /// <summary>Which phase the sleep evaluated.</summary>
+    Sleep,
+
+    /// <summary>All values set in the phase had the same technical type (E-13).</summary>
+    TypeObserved,
+
+    /// <summary>Values set in the phase had different technical types (E-13).</summary>
+    TypesMixed,
+
+    /// <summary>Too few operations to decide on the layout (E-34).</summary>
+    NotEnoughData,
+
+    /// <summary>The layout stays (E-34).</summary>
+    LayoutKept,
+
+    /// <summary>The layout changed (E-34).</summary>
+    LayoutChanged,
+}
+
+/// <summary>One entry of the sleep log. <see cref="Entity"/> and <see cref="Attribute"/> are null for the whole sleep.</summary>
+public sealed record SleepLogEntry(SleepLogKind Kind, string? Entity, string? Attribute, string Message);
+
+/// <summary>A stored entry: which waking phase it evaluated and when it was written.</summary>
+public sealed record SleepLogRecord(long Phase, DateTimeOffset LoggedAt, SleepLogEntry Entry);
+
+internal static class SleepLogKinds
+{
+    public static string Name(SleepLogKind kind) => kind switch
+    {
+        SleepLogKind.Sleep => "sleep",
+        SleepLogKind.TypeObserved => "type_observed",
+        SleepLogKind.TypesMixed => "types_mixed",
+        SleepLogKind.NotEnoughData => "not_enough_data",
+        SleepLogKind.LayoutKept => "layout_kept",
+        SleepLogKind.LayoutChanged => "layout_changed",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
+    public static SleepLogKind Parse(string name) =>
+        Enum.GetValues<SleepLogKind>().First(k => Name(k) == name);
+}

@@ -118,6 +118,8 @@ What the numbers say:
 - The write advantage of H2 is small on SQLite: most of the time of a write is spent committing its transaction, the second write of H1 adds little.
 - A layout change is cheap enough to run during sleep even for large histories.
 
+The sleep uses the midpoints of these ranges as its cost model for SQLite (`SqliteCosts.Measured`, see [`../storage.md`](../storage.md#layout-decision)).
+
 ## Related, not yet covered
 
 - Timestamping per row instead of per attribute: all attributes of an entity versioned together. Pays off when attributes mostly change together. Source: [Jensen, Soo, Snodgrass: Unifying temporal data models via a conceptual model (1994)](https://smsf.cs.arizona.edu/~rts/pubs/ISDec94.pdf).

@@ -264,6 +264,33 @@ public class HistoryLayoutTests : IDisposable
         Assert.Equal(new StoredValue("Leipzig", Age10), store.GetCurrentValue(anna, "Wohnort"));
     }
 
+    // A failure in the last step of a change rolls back every earlier step: tables, catalog and structure model (E-33).
+    // The failure is injected from outside: H2 -> H1 ends with a delete from the history table, which a trigger refuses;
+    // H1 -> H2 ends with dropping the current columns, which SQLite refuses while a view uses them.
+    [Theory]
+    [InlineData(H2, H1, """CREATE TRIGGER "fail" BEFORE DELETE ON "Mensch.Körpergröße" BEGIN SELECT RAISE(ABORT, 'injected'); END""")]
+    [InlineData(H1, H2, """CREATE VIEW "fail" AS SELECT "Körpergröße" FROM "Mensch" """)]
+    public void ChangeLayout_FailingInTheLastStep_RollsBackEverything(AttributeLayout from, AttributeLayout to, string sabotage)
+    {
+        var path = TempFile();
+        using var store = SqliteStore.Create(path, Model(from), new FixedTimeProvider(Now));
+        var people = Fill(store);
+        var before = Snapshot(store, people);
+        var structure = store.Structure;
+        var columns = Columns(path, "Mensch");
+        var historyRows = Scalar(path, """SELECT count(*) FROM "Mensch.Körpergröße" """);
+        Execute(path, sabotage);
+
+        Assert.ThrowsAny<SqliteException>(() => store.ChangeLayout("Mensch", "Körpergröße", to));
+
+        Assert.Same(structure, store.Structure);
+        Assert.Equal(from.ToString(), Scalar(path,
+            """SELECT layout FROM "_tursiops_structure" WHERE entity = 'Mensch' AND attribute = 'Körpergröße'"""));
+        Assert.Equal(columns, Columns(path, "Mensch"));
+        Assert.Equal(historyRows, Scalar(path, """SELECT count(*) FROM "Mensch.Körpergröße" """));
+        Assert.Equal(before, Snapshot(store, people));
+    }
+
     // ---------- Helpers ----------
 
     private static StructureModel Model(AttributeLayout? history = null)
@@ -325,6 +352,14 @@ public class HistoryLayoutTests : IDisposable
         using var command = connection.CreateCommand();
         command.CommandText = sql;
         return command.ExecuteScalar();
+    }
+
+    private static void Execute(string path, string sql)
+    {
+        using var connection = Connect(path);
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
     }
 
     private static List<long> Longs(string path, string sql)

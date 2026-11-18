@@ -49,6 +49,15 @@ dotnet test
 dotnet run --project src/Tursiops.Cli
 ```
 
+Commands:
+
+```
+tursiops sleep <database>   Evaluate the waking phase, decide on layouts, log every decision.
+tursiops log <database>     Show the sleep log.
+```
+
+How sleep decides and what it logs: [`docs/storage.md`](docs/storage.md#sleep).
+
 Benchmark of the `@history` layouts:
 
 ```

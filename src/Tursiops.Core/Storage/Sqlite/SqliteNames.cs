@@ -11,6 +11,7 @@ internal static class SqliteNames
     public const string EntitiesTable = "_tursiops_entities";
     public const string PhasesTable = "_tursiops_phases";
     public const string ObservationsTable = "_tursiops_observations";
+    public const string SleepLogTable = "_tursiops_sleep_log";
 
     public const string IdColumn = "_id";
     public const string EntityColumn = "_entity";

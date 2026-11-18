@@ -1,6 +1,6 @@
 # Storage in SQLite
 
-How the translation layer in `src/Tursiops.Core/Storage/Sqlite` lays out a Tursiops database in SQLite. The reasons behind it are recorded in the project's decision log (E-06, E-13, E-21, E-23, E-25 to E-33).
+How the translation layer in `src/Tursiops.Core/Storage/Sqlite` lays out a Tursiops database in SQLite. The reasons behind it are recorded in the project's decision log (E-06, E-13, E-21, E-23, E-25 to E-35).
 
 Only the translation layer knows tables and SQL. Everything else works with entities, attributes and storage layouts. Which layouts exist for which attribute is described in `StructureModel.cs`.
 
@@ -23,6 +23,7 @@ The structure model is stored in the same file, so a database stays a single fil
 | `_tursiops_structure` | `entity`, `attribute`, `position`, `time`, `layout` | Per attribute: its time behavior (`Timeless`, `CurrentOnly`, `History`) and its storage layout |
 | `_tursiops_phases` | `phase`, `started_at`, `started_offset` | Waking phases, from one sleep to the next, and when each began (see [Observation](#observation)) |
 | `_tursiops_observations` | `phase`, `entity`, `attribute`, `counter`, `count` | Per phase and attribute: how often each counter was hit (see [Observation](#observation)) |
+| `_tursiops_sleep_log` | `entry`, `phase`, `logged_at`, `logged_offset`, `kind`, `entity`, `attribute`, `message` | Every decision of the sleep in readable English, per evaluated phase (see [Sleep](#sleep)) |
 
 A change of layout changes tables and catalog in one transaction. SQLite rolls back schema changes together with the transaction (covered by tests).
 
@@ -85,6 +86,49 @@ Creating an entity is not counted, nor is an operation that fails. Changing the 
 Counts belong to a waking phase, from one sleep to the next. The first phase is 1. `StartNewPhase` ends the current phase and starts the next one at zero; earlier phases are kept.
 
 Counts are kept in memory and written to the file in one transaction when the store is closed and by `FlushObservations` (called before each sleep). If the program crashes, counts since the last write are lost; the stored information is not affected (decision log E-32).
+
+## Sleep
+
+`Sleeper.Run` (in `src/Tursiops.Core/Sleep`) is triggered by hand, e.g. with `tursiops sleep <database>` (decision log E-04). It
+
+1. writes the counts kept in memory to the file,
+2. reads the counts of the current waking phase and, from the tables, the number of entities and of stored values per attribute,
+3. logs the technical types of the values set in the phase (E-13): one type, or several types with their counts. Nothing is rejected or converted,
+4. decides the layout of every attribute with `@history` (E-34, below),
+5. changes the layouts, writes the log and starts the next waking phase, all in one transaction (`SqliteStore.InOneTransaction`). If a step fails, file and store stay as before.
+
+### Layout decision
+
+For each layout, the sleep estimates what the evaluated phase would have cost: per counted operation its number times its cost, for reading all entities also times the number of entities. Late writes are counted among writes and cost the same.
+
+The layout changes only if another layout saves more than the cost of changing (per stored value) plus 20 % of the cost of the current layout. With fewer than 100 operations in the phase (writes and reads, late writes not counted twice) nothing is decided. Both thresholds are set in `LayoutRule.Default`.
+
+Costs depend on the target system. For SQLite they are in `SqliteCosts.Measured`: the midpoints of the measured ranges in [`concepts/time.md`](concepts/time.md), in microseconds. Where the measurement found no consistent difference, both layouts get the same cost.
+
+| Operation | H2 | H1 |
+|---|---|---|
+| Write | 1,200 | 1,350 |
+| Read current, one entity | 15 | 15 |
+| Read current of all entities, per entity | 0.935 | 0.63 |
+| Read history, one entity | 31 | 39.5 |
+| Change layout, per value | 0.55 | 0.55 |
+
+With these numbers, H1 only wins when current values of all entities are read often. H2 wins back only when histories are read often: H1 writes about 12 % slower, less than the required 20 %, so writing alone does not change H1 back to H2.
+
+### Log
+
+`_tursiops_sleep_log` keeps one row per entry, in the order written (`entry`). `phase` is the waking phase the sleep evaluated, `logged_at` and `logged_offset` when the entry was written (stored like valid times). `entity` and `attribute` are empty for entries about the whole sleep. `kind` is one of:
+
+| Kind | Entry |
+|---|---|
+| `sleep` | which phase was evaluated, how many layouts changed and stayed |
+| `type_observed` | all values set in the phase had one technical type |
+| `types_mixed` | values set in the phase had several technical types, with their counts |
+| `not_enough_data` | fewer operations than needed, no layout decision |
+| `layout_kept` | the numbers of the decision, the layout stays |
+| `layout_changed` | the numbers of the decision, the layout changed |
+
+`SqliteStore.GetSleepLog` reads the log, `tursiops log <database>` prints it.
 
 ## Valid times
 

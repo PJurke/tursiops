@@ -1,4 +1,5 @@
 using Tursiops.Core.Format;
+using Tursiops.Core.Sleep;
 using Microsoft.Data.Sqlite;
 using static Tursiops.Core.Storage.Sqlite.SqliteNames;
 
@@ -45,6 +46,7 @@ public sealed class SqliteStore : IDisposable
             foreach (var entity in structure.Entities)
                 CreateEntityTables(connection, transaction, entity);
             var phase = PrepareObservations(connection, transaction, time);
+            PrepareSleepLog(connection, transaction);
             transaction.Commit();
 
             return new SqliteStore(connection, structure, time, phase);
@@ -69,6 +71,7 @@ public sealed class SqliteStore : IDisposable
             time ??= TimeProvider.System;
             using var transaction = connection.BeginTransaction();
             var phase = PrepareObservations(connection, transaction, time);
+            PrepareSleepLog(connection, transaction);
             transaction.Commit();
 
             return new SqliteStore(connection, LoadCatalog(connection), time, phase);
@@ -411,6 +414,107 @@ public sealed class SqliteStore : IDisposable
             ("$at", ToSortableUtc(now)), ("$offset", ToOffsetMinutes(now)));
         return 1;
     }
+
+    // ---------- Sleep (E-34, E-35) ----------
+
+    /// <summary>Number of entities, e.g. persons. Part of the data shape the sleep reads from the tables (E-31).</summary>
+    /// <exception cref="ArgumentException">Unknown entity.</exception>
+    public long CountEntities(string entity)
+    {
+        Structure.Entity(entity);
+        return (long)Scalar($"SELECT count(*) FROM {Quote(EntityTable(entity))}")!;
+    }
+
+    /// <summary>
+    /// Number of stored values of an attribute: for <c>@history</c> every value in the history, otherwise one per entity
+    /// that has a value. The sleep uses it to estimate the cost of a layout change (E-34).
+    /// </summary>
+    /// <exception cref="ArgumentException">Unknown entity or attribute.</exception>
+    public long CountValues(string entity, string attribute)
+    {
+        var target = Structure.Entity(entity).Attribute(attribute);
+        var table = Quote(EntityTable(entity));
+        var sql = target.Layout switch
+        {
+            AttributeLayout.Column => $"SELECT count(*) FROM {table} WHERE {Quote(attribute)} IS NOT NULL",
+            AttributeLayout.ColumnWithTime => $"SELECT count(*) FROM {table} WHERE {Quote(CurrentValidAtColumn(attribute))} IS NOT NULL",
+            AttributeLayout.HistoryTable => $"SELECT count(*) FROM {Quote(HistoryTable(entity, attribute))}",
+            AttributeLayout.CurrentColumnAndHistoryTable =>
+                $"SELECT (SELECT count(*) FROM {Quote(HistoryTable(entity, attribute))}) + " +
+                $"(SELECT count(*) FROM {table} WHERE {Quote(CurrentValidAtColumn(attribute))} IS NOT NULL)",
+            _ => throw new InvalidOperationException($"Layout {target.Layout} is not known."),
+        };
+        return (long)Scalar(sql)!;
+    }
+
+    /// <summary>
+    /// Runs several steps as one unit, e.g. a whole sleep: layout changes, log entries and the start of a new phase.
+    /// If a step fails, the file and this store are left as before. Counts that are not yet written to the file
+    /// are lost on failure if a step wrote them, so the sleep writes them before.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Called inside another unit.</exception>
+    public void InOneTransaction(Action action)
+    {
+        if (_transaction is not null)
+            throw new InvalidOperationException("A transaction is already running.");
+
+        var structure = Structure;
+        var phase = Phase;
+        try
+        {
+            InTransaction(action);
+        }
+        catch
+        {
+            Structure = structure;
+            Phase = phase;
+            throw;
+        }
+    }
+
+    /// <summary>Appends entries to the sleep log in the file (E-35), for the phase they evaluated.</summary>
+    public void WriteSleepLog(long phase, IEnumerable<SleepLogEntry> entries)
+    {
+        var now = _time.GetUtcNow();
+        InTransaction(() =>
+        {
+            foreach (var entry in entries)
+                Execute(
+                    $"INSERT INTO {Quote(SleepLogTable)} (phase, logged_at, logged_offset, kind, entity, attribute, message) " +
+                    "VALUES ($phase, $at, $offset, $kind, $entity, $attribute, $message)",
+                    ("$phase", phase), ("$at", ToSortableUtc(now)), ("$offset", ToOffsetMinutes(now)),
+                    ("$kind", SleepLogKinds.Name(entry.Kind)), ("$entity", entry.Entity), ("$attribute", entry.Attribute),
+                    ("$message", entry.Message));
+        });
+    }
+
+    /// <summary>The whole sleep log, in the order it was written.</summary>
+    public IReadOnlyList<SleepLogRecord> GetSleepLog()
+    {
+        using var command = Command(
+            $"SELECT phase, logged_at, logged_offset, kind, entity, attribute, message FROM {Quote(SleepLogTable)} ORDER BY entry");
+        using var reader = command.ExecuteReader();
+        var records = new List<SleepLogRecord>();
+        while (reader.Read())
+            records.Add(new SleepLogRecord(
+                reader.GetInt64(0),
+                FromStored(reader.GetString(1), reader.GetInt64(2)),
+                new SleepLogEntry(
+                    SleepLogKinds.Parse(reader.GetString(3)),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetString(5),
+                    reader.GetString(6))));
+        return records;
+    }
+
+    // Creates the log table if missing (also for files from before E-35).
+    private static void PrepareSleepLog(SqliteConnection connection, SqliteTransaction transaction) =>
+        Execute(connection, transaction,
+            $"CREATE TABLE IF NOT EXISTS {Quote(SleepLogTable)} (" +
+            "entry INTEGER PRIMARY KEY, " +
+            "phase INTEGER NOT NULL REFERENCES " + Quote(PhasesTable) + " (phase), " +
+            "logged_at TEXT NOT NULL, logged_offset INTEGER NOT NULL, " +
+            "kind TEXT NOT NULL, entity TEXT, attribute TEXT, message TEXT NOT NULL)");
 
     // ---------- Changing the layout ----------
 
