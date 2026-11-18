@@ -36,7 +36,7 @@ public class SqliteBehaviorTests
     }
 
     [Fact]
-    public void UntypedColumns_KeepTheTypeOfEachValue() // E-13, E-23
+    public void UntypedColumns_KeepTheTypeOfEachValue() // E-23, E-41
     {
         using var connection = Open();
         Execute(connection, """CREATE TABLE "t" ("v")""");

@@ -4,7 +4,7 @@ Tursiops stores your data and decides on its own how to store it. This page expl
 
 ## You decide what, Tursiops decides how
 
-The ontology says which information exists. `Körpergröße @history` means: every height is kept together with the time it was valid. That is the information, and Tursiops never changes it.
+The ontology says which information exists. `Körpergröße: number @history` means: every height is a number, and every height is kept together with the time it was valid. That is the information, and Tursiops never changes it.
 
 How the values are stored, in which tables and columns, is up to Tursiops. When it changes the storage, every value, every valid time and every current value reads exactly as before.
 

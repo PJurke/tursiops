@@ -117,7 +117,7 @@ public static class TurParser
             }
         }
 
-        // attribute = name [ "in" unit ] { annotation } line_end
+        // attribute = name ":" type [ "in" unit ] { annotation } line_end
         private AttributeDefinition ParseAttribute(string entityName, Dictionary<string, SourcePosition> seenAttributes)
         {
             var position = Position;
@@ -127,6 +127,8 @@ public static class TurParser
                 throw Error(TurErrorKind.DuplicateAttribute, position,
                     $"The entity '{entityName}' already has an attribute named '{name}' ({first}).");
             seenAttributes[name] = position;
+
+            var type = ParseType(name);
 
             var annotations = new List<(string Name, SourcePosition Position)>();
             while (true)
@@ -164,8 +166,46 @@ public static class TurParser
                 _ => "Only annotations like '@time' or '@history' or a comment ('//') may follow an attribute.",
             });
 
-            return new AttributeDefinition(name, annotations.Select(a => a.Name).ToList(), position);
+            return new AttributeDefinition(name, type, annotations.Select(a => a.Name).ToList(), position);
         }
+
+        // ":" type, with type = "number" | "text" | "date" | "bi" (E-41)
+        private BaseType ParseType(string attributeName)
+        {
+            SkipSpaces();
+            if (Current != ':')
+            {
+                var hint = IsLetter(Current) && !IsKeywordIn()
+                    ? " Names cannot contain spaces."
+                    : "";
+                throw Error(TurErrorKind.MissingType, Position,
+                    $"Expected ':' and a type after the attribute '{attributeName}', but found {Describe(Current)}.{hint} " +
+                    $"Every attribute declares its type, for example '{attributeName}: number'. Known types: {KnownTypes}.");
+            }
+            Advance();
+
+            SkipSpaces();
+            var position = Position;
+            if (!IsLetter(Current))
+                throw Error(TurErrorKind.MissingType, position,
+                    $"Expected a type after '{attributeName}:', but found {Describe(Current)}. Known types: {KnownTypes}.");
+
+            var name = ReadNameCharacters();
+            if (BaseTypes.FromName(name) is { } type)
+                return type;
+
+            var sameLetters = BaseTypes.All.Select(BaseTypes.Name)
+                .FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
+            var hintText =
+                sameLetters is not null ? $" Types are case-sensitive. Did you mean '{sameLetters}'?"
+                : name.Equals("boolean", StringComparison.OrdinalIgnoreCase) || name.Equals("bool", StringComparison.OrdinalIgnoreCase)
+                    ? $" Two-valued attributes use '{BaseTypes.Name(BaseType.Bi)}'."
+                : "";
+            throw Error(TurErrorKind.UnknownType, position,
+                $"Unknown type '{name}'.{hintText} Known types: {KnownTypes}.");
+        }
+
+        private static string KnownTypes => string.Join(", ", BaseTypes.All.Select(BaseTypes.Name));
 
         // '@history' already includes time, so '@time' next to it says nothing new (E-24).
         private void WarnIfTimeIsRedundant(string attributeName, List<(string Name, SourcePosition Position)> annotations)

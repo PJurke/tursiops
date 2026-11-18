@@ -1,6 +1,6 @@
-// Example ontology for the first prototype (E-36, E-24)
+// Example ontology for the first prototype (E-36, E-24, E-41)
 Mensch {
-  Name
-  Wohnort @time
-  Körpergröße @history
+  Name: text
+  Wohnort: text @time
+  Körpergröße: number @history
 }

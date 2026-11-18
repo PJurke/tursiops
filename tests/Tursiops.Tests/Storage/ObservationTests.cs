@@ -12,9 +12,9 @@ public class ObservationTests : IDisposable
 {
     private const string Source = """
         Mensch {
-          Name
-          Wohnort @time
-          Körpergröße @history
+          Name: text
+          Wohnort: text @time
+          Körpergröße: number @history
         }
         """;
 
@@ -69,10 +69,10 @@ public class ObservationTests : IDisposable
         using var store = Memory(layout ?? H2);
         var anna = store.CreateEntity("Mensch");
 
-        store.SetValue(anna, attribute, 1L, ValueTime.At(Age12));
-        store.SetValue(anna, attribute, 2L, ValueTime.At(Age14));
-        store.SetValue(anna, attribute, 3L, ValueTime.At(Age10)); // late
-        store.SetValue(anna, attribute, 4L, ValueTime.At(Age14)); // same time as current, not late
+        store.SetValue(anna, attribute, Typed(attribute, 1), ValueTime.At(Age12));
+        store.SetValue(anna, attribute, Typed(attribute, 2), ValueTime.At(Age14));
+        store.SetValue(anna, attribute, Typed(attribute, 3), ValueTime.At(Age10)); // late
+        store.SetValue(anna, attribute, Typed(attribute, 4), ValueTime.At(Age14)); // same time as current, not late
 
         var observed = store.GetObservations("Mensch", attribute);
         Assert.Equal(4, observed.Writes);
@@ -127,57 +127,33 @@ public class ObservationTests : IDisposable
         Assert.ThrowsAny<ArgumentException>(() => store.GetObservations("Mensch", "Schuhgröße"));
     }
 
-    // ---------- Technical types (E-13, E-31) ----------
+    // ---------- Base types (E-41) ----------
 
-    [Fact] // test 5
-    public void ValueTypes_AreCountedPerAttribute_NullIsNot()
+    [Fact] // test 5: a value of another type is rejected, so it is no use of the data
+    public void ValuesOfAnotherType_AreRejected_AndNotCounted()
     {
         using var store = Memory(H2);
         var anna = store.CreateEntity("Mensch");
 
-        store.SetValue(anna, "Name", 42);              // Number (int)
-        store.SetValue(anna, "Name", 42L);             // Number (long)
-        store.SetValue(anna, "Name", 1.81);            // Number (double)
-        store.SetValue(anna, "Name", 1.81m);           // Number (decimal)
-        store.SetValue(anna, "Name", "Anna");          // Text
-        store.SetValue(anna, "Name", Age10);           // Date (DateTimeOffset)
-        store.SetValue(anna, "Name", Age10.UtcDateTime); // Date (DateTime)
-        store.SetValue(anna, "Name", true);            // Boolean
-        store.SetValue(anna, "Name", null);            // no type
+        Assert.Throws<ArgumentException>(() => store.SetValue(anna, "Name", 42L));
+        Assert.Throws<ArgumentException>(() => store.SetValue(anna, "Wohnort", 42L, ValueTime.At(Age10)));
+        Assert.Throws<ArgumentException>(() => store.SetValue(anna, "Körpergröße", "181", ValueTime.At(Age10)));
 
-        var observed = store.GetObservations("Mensch", "Name");
-        Assert.Equal(9, observed.Writes);
-        Assert.Equal(4, observed.Numbers);
-        Assert.Equal(1, observed.Texts);
-        Assert.Equal(2, observed.Dates);
-        Assert.Equal(1, observed.Booleans);
+        foreach (var attribute in new[] { "Name", "Wohnort", "Körpergröße" })
+            Assert.Equal(AttributeObservations.None, store.GetObservations("Mensch", attribute));
     }
 
-    [Fact] // test 5: timed values are typed the same way
-    public void ValueTypes_AreCountedForTimedValues()
-    {
-        using var store = Memory(H1);
-        var anna = store.CreateEntity("Mensch");
-
-        store.SetValue(anna, "Körpergröße", 155L, ValueTime.At(Age12));
-        store.SetValue(anna, "Körpergröße", "1,68 m", ValueTime.At(Age14));
-
-        var observed = store.GetObservations("Mensch", "Körpergröße");
-        Assert.Equal(1, observed.Numbers);
-        Assert.Equal(1, observed.Texts);
-    }
-
-    [Fact] // test 6
-    public void TextThatLooksLikeANumber_IsText()
+    [Fact] // test 6: null is a value for number, text and date
+    public void Null_IsCountedAsAWrite()
     {
         using var store = Memory(H2);
         var anna = store.CreateEntity("Mensch");
 
-        store.SetValue(anna, "Name", "180");
+        store.SetValue(anna, "Name", null);
+        store.SetValue(anna, "Körpergröße", null, ValueTime.At(Age10));
 
-        var observed = store.GetObservations("Mensch", "Name");
-        Assert.Equal(1, observed.Texts);
-        Assert.Equal(0, observed.Numbers);
+        Assert.Equal(1, store.GetObservations("Mensch", "Name").Writes);
+        Assert.Equal(1, store.GetObservations("Mensch", "Körpergröße").Writes);
     }
 
     [Theory] // test 7
@@ -197,19 +173,6 @@ public class ObservationTests : IDisposable
 
     public static TheoryData<object> UnsupportedValues() =>
         [new byte[] { 1, 2 }, Guid.Empty, TimeSpan.FromHours(1), 'x'];
-
-    [Fact] // test 8: why the type has to be recognized when a value comes in
-    public void Sqlite_ReturnsBooleansAsNumbers_AndDatesAsText()
-    {
-        using var store = Memory(H2);
-        var anna = store.CreateEntity("Mensch");
-
-        store.SetValue(anna, "Name", true);
-        Assert.IsType<long>(store.GetCurrentValue(anna, "Name")!.Value);
-
-        store.SetValue(anna, "Name", Age10);
-        Assert.IsType<string>(store.GetCurrentValue(anna, "Name")!.Value);
-    }
 
     // ---------- Writing counters to the file (E-32) ----------
 
@@ -268,7 +231,6 @@ public class ObservationTests : IDisposable
             var observed = store.GetObservations("Mensch", "Körpergröße");
             Assert.Equal(3, observed.Writes);
             Assert.Equal(1, observed.LateWrites);
-            Assert.Equal(3, observed.Numbers);
         }
     }
 
@@ -376,13 +338,15 @@ public class ObservationTests : IDisposable
 
         var height = store.GetObservations("Mensch", "Körpergröße");
         Assert.Equal(1, height.Writes);
-        Assert.Equal(1, height.Numbers);
         Assert.Equal(0, height.CurrentReads);
         Assert.Equal(0, height.AllCurrentReads);
         Assert.Equal(1, height.HistoryReads);
     }
 
     // ---------- Helpers ----------
+
+    // A value of the declared type (E-41): Wohnort is text, Körpergröße a number.
+    private static object Typed(string attribute, long n) => attribute == "Wohnort" ? $"Ort {n}" : n;
 
     private static StructureModel Model(AttributeLayout history) =>
         StructureModel.FromOntology(TurParser.Parse(Source).Ontology).WithLayout("Mensch", "Körpergröße", history);

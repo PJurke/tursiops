@@ -36,12 +36,10 @@ public static class Sleeper
             var entityCount = store.CountEntities(entity.Name);
             foreach (var attribute in entity.Attributes)
             {
-                var observed = store.GetObservations(entity.Name, attribute.Name);
-                if (DescribeTypes(entity.Name, attribute.Name, observed) is { } typeEntry)
-                    entries.Add(typeEntry);
-
                 if (AttributeLayouts.AllowedFor(attribute.Time).Count < 2)
                     continue;
+
+                var observed = store.GetObservations(entity.Name, attribute.Name);
 
                 var decision = LayoutDecider.Decide(attribute, entity.Name, observed, entityCount,
                     store.CountValues(entity.Name, attribute.Name), costs, rule);
@@ -77,51 +75,6 @@ public static class Sleeper
         LayoutOutcome.Kept => SleepLogKind.LayoutKept,
         LayoutOutcome.Changed => SleepLogKind.LayoutChanged,
         _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, null),
-    };
-
-    // E-13: which technical types the values of this phase had. Nothing is rejected or converted,
-    // a value of another type than most is named as a possible mistake.
-    private static SleepLogEntry? DescribeTypes(string entity, string attribute, AttributeObservations observed)
-    {
-        var types = new (TechnicalType Type, long Count)[]
-            {
-                (TechnicalType.Number, observed.Numbers),
-                (TechnicalType.Text, observed.Texts),
-                (TechnicalType.Date, observed.Dates),
-                (TechnicalType.Boolean, observed.Booleans),
-            }
-            .Where(t => t.Count > 0)
-            .OrderByDescending(t => t.Count)
-            .ToList();
-        if (types.Count == 0)
-            return null;
-
-        var name = $"{entity}.{attribute}";
-        var total = types.Sum(t => t.Count);
-        if (types.Count == 1)
-            return new SleepLogEntry(SleepLogKind.TypeObserved, entity, attribute,
-                $"{name}: {(total == 1 ? "the value" : $"all {Number(total)} values")} set in this phase " +
-                $"{(total == 1 ? "is a" : "are")} {TypeName(types[0].Type, total)}.");
-
-        var most = types[0];
-        var others = total - most.Count;
-        return new SleepLogEntry(SleepLogKind.TypesMixed, entity, attribute,
-            $"{name} received values of different types in this phase. Every value is kept as it was given.",
-            "Types: " + string.Join(", ", types.Select(t => $"{Number(t.Count)} {TypeName(t.Type, t.Count)}")) + ". " +
-            $"Most are {TypeName(most.Type, 2)}; the {Count(others, "value")} of other types may be mistakes.");
-    }
-
-    private static string TypeName(TechnicalType type, long count) => (type, count == 1) switch
-    {
-        (TechnicalType.Number, true) => "number",
-        (TechnicalType.Number, false) => "numbers",
-        (TechnicalType.Text, true) => "text",
-        (TechnicalType.Text, false) => "texts",
-        (TechnicalType.Date, true) => "date",
-        (TechnicalType.Date, false) => "dates",
-        (TechnicalType.Boolean, true) => "boolean",
-        (TechnicalType.Boolean, false) => "booleans",
-        _ => type.ToString(),
     };
 
     private static string Number(long n) => n.ToString("N0", CultureInfo.InvariantCulture);

@@ -68,6 +68,11 @@ public sealed class SqliteStore : IDisposable
         {
             if (!TableExists(connection, StructureTable))
                 throw new InvalidOperationException($"'{path}' is not a Tursiops database.");
+            if (!ColumnExists(connection, StructureTable, "type"))
+                throw new InvalidOperationException(
+                    $"'{path}' was created by an older version of Tursiops, in which attributes had no declared types. " +
+                    "Tursiops does not guess the types from the stored values. " +
+                    "Add a type to each attribute in the ontology (for example 'Körpergröße: number @history') and create the database again.");
 
             time ??= TimeProvider.System;
             using var transaction = connection.BeginTransaction();
@@ -115,13 +120,13 @@ public sealed class SqliteStore : IDisposable
             throw new ArgumentException(
                 $"'{entity.Entity}.{attribute}' is {StructureModel.Describe(target.Time)}, so its value needs a time. " +
                 "Pass ValueTime.Now or ValueTime.At(...).", nameof(attribute));
-        var type = TechnicalTypes.Of(value);
+        ValueTypes.Check(entity.Entity, attribute, target.Type, value);
 
         Execute(
             $"UPDATE {Quote(EntityTable(entity.Entity))} SET {Quote(attribute)} = $value WHERE {Quote(IdColumn)} = $id",
             ("$value", value), ("$id", entity.Id));
 
-        ObserveWrite(entity.Entity, attribute, type, late: false);
+        ObserveWrite(entity.Entity, attribute, late: false);
     }
 
     /// <summary>
@@ -134,7 +139,7 @@ public sealed class SqliteStore : IDisposable
         if (target.Time == AttributeTime.Timeless)
             throw new ArgumentException(
                 $"'{entity.Entity}.{attribute}' is {StructureModel.Describe(target.Time)}, so its value takes no time.", nameof(time));
-        var type = TechnicalTypes.Of(value);
+        ValueTypes.Check(entity.Entity, attribute, target.Type, value);
 
         var validAt = time.Resolve(_time);
         var utc = ToSortableUtc(validAt);
@@ -181,7 +186,7 @@ public sealed class SqliteStore : IDisposable
                 throw new InvalidOperationException($"Layout {target.Layout} cannot hold a timed value.");
         }
 
-        ObserveWrite(entity.Entity, attribute, type, late);
+        ObserveWrite(entity.Entity, attribute, late);
     }
 
     private void InsertIntoHistory(EntityRef entity, string attribute, object? value, string utc, long offset) =>
@@ -409,16 +414,14 @@ public sealed class SqliteStore : IDisposable
             _pending.Add(entity, attribute, counter);
     }
 
-    private void ObserveWrite(string entity, string attribute, TechnicalType? type, bool late)
+    private void ObserveWrite(string entity, string attribute, bool late)
     {
         Observe(entity, attribute, Counter.Write);
         if (late)
             Observe(entity, attribute, Counter.LateWrite);
-        if (type is { } t)
-            Observe(entity, attribute, Counters.For(t));
     }
 
-    // Creates the observation tables if missing (also for files from before E-31) and returns the current phase.
+    // Creates the observation tables if missing and returns the current phase.
     private static long PrepareObservations(SqliteConnection connection, SqliteTransaction transaction, TimeProvider time)
     {
         Execute(connection, transaction,
@@ -536,8 +539,7 @@ public sealed class SqliteStore : IDisposable
         return records;
     }
 
-    // Creates the log table if missing (also for files from before E-35). Files from before E-37 kept one column `message`;
-    // it becomes the summary, with empty details.
+    // Creates the log table if missing.
     private static void PrepareSleepLog(SqliteConnection connection, SqliteTransaction transaction)
     {
         Execute(connection, transaction,
@@ -546,14 +548,6 @@ public sealed class SqliteStore : IDisposable
             "phase INTEGER NOT NULL REFERENCES " + Quote(PhasesTable) + " (phase), " +
             "logged_at TEXT NOT NULL, logged_offset INTEGER NOT NULL, " +
             "kind TEXT NOT NULL, entity TEXT, attribute TEXT, summary TEXT NOT NULL, details TEXT NOT NULL DEFAULT '')");
-
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{SleepLogTable}') WHERE name = 'message'";
-        if ((long)command.ExecuteScalar()! == 0)
-            return;
-        Execute(connection, transaction, $"ALTER TABLE {Quote(SleepLogTable)} RENAME COLUMN message TO summary");
-        Execute(connection, transaction, $"ALTER TABLE {Quote(SleepLogTable)} ADD COLUMN details TEXT NOT NULL DEFAULT ''");
     }
 
     // ---------- Changing the layout ----------
@@ -701,7 +695,7 @@ public sealed class SqliteStore : IDisposable
         Execute(connection, transaction,
             $"CREATE TABLE {Quote(StructureTable)} (" +
             "entity TEXT NOT NULL, attribute TEXT NOT NULL, position INTEGER NOT NULL, " +
-            "time TEXT NOT NULL, layout TEXT NOT NULL, PRIMARY KEY (entity, attribute))");
+            "type TEXT NOT NULL, time TEXT NOT NULL, layout TEXT NOT NULL, PRIMARY KEY (entity, attribute))");
 
         for (var e = 0; e < structure.Entities.Count; e++)
         {
@@ -714,9 +708,10 @@ public sealed class SqliteStore : IDisposable
             {
                 var attribute = entity.Attributes[a];
                 Execute(connection, transaction,
-                    $"INSERT INTO {Quote(StructureTable)} (entity, attribute, position, time, layout) " +
-                    "VALUES ($entity, $attribute, $position, $time, $layout)",
+                    $"INSERT INTO {Quote(StructureTable)} (entity, attribute, position, type, time, layout) " +
+                    "VALUES ($entity, $attribute, $position, $type, $time, $layout)",
                     ("$entity", entity.Name), ("$attribute", attribute.Name), ("$position", a),
+                    ("$type", BaseTypes.Name(attribute.Type)),
                     ("$time", attribute.Time.ToString()), ("$layout", attribute.Layout.ToString()));
             }
         }
@@ -728,15 +723,17 @@ public sealed class SqliteStore : IDisposable
         using (var command = connection.CreateCommand())
         {
             command.CommandText =
-                $"SELECT entity, attribute, time, layout FROM {Quote(StructureTable)} ORDER BY entity, position";
+                $"SELECT entity, attribute, type, time, layout FROM {Quote(StructureTable)} ORDER BY entity, position";
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
-                var layout = Enum.Parse<AttributeLayout>(reader.GetString(3));
+                var type = BaseTypes.FromName(reader.GetString(2))
+                    ?? throw new InvalidOperationException($"Unknown base type '{reader.GetString(2)}' in the database file.");
+                var layout = Enum.Parse<AttributeLayout>(reader.GetString(4));
                 var list = attributes.TryGetValue(reader.GetString(0), out var existing)
                     ? existing
                     : attributes[reader.GetString(0)] = [];
-                list.Add(new AttributeStructure(reader.GetString(1), Enum.Parse<AttributeTime>(reader.GetString(2)), layout));
+                list.Add(new AttributeStructure(reader.GetString(1), type, Enum.Parse<AttributeTime>(reader.GetString(3)), layout));
             }
         }
 
@@ -757,7 +754,7 @@ public sealed class SqliteStore : IDisposable
 
     private static void CreateEntityTables(SqliteConnection connection, SqliteTransaction transaction, EntityStructure entity)
     {
-        // Untyped value columns: SQLite keeps the type of each value (E-13, E-23).
+        // Untyped value columns: SQLite keeps the type of each value, Tursiops checks it on writing (E-23, E-41).
         var columns = new List<string> { $"{Quote(IdColumn)} INTEGER PRIMARY KEY" };
         foreach (var attribute in entity.Attributes)
         {
@@ -830,6 +827,15 @@ public sealed class SqliteStore : IDisposable
         command.CommandText = "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = $name";
         command.Parameters.AddWithValue("$name", name);
         return (long)command.ExecuteScalar()! == 1;
+    }
+
+    private static bool ColumnExists(SqliteConnection connection, string table, string column)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM pragma_table_info($table) WHERE name = $column";
+        command.Parameters.AddWithValue("$table", table);
+        command.Parameters.AddWithValue("$column", column);
+        return command.ExecuteScalar() is not null;
     }
 
     private SqliteCommand Command(string sql, params (string Name, object? Value)[] parameters)

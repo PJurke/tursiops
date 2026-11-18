@@ -42,8 +42,8 @@ public static class AttributeLayouts
     };
 }
 
-/// <summary>Storage decision for one attribute.</summary>
-public sealed record AttributeStructure(string Name, AttributeTime Time, AttributeLayout Layout);
+/// <summary>Storage decision for one attribute, with the content it stores: base type (E-41) and time (E-25).</summary>
+public sealed record AttributeStructure(string Name, BaseType Type, AttributeTime Time, AttributeLayout Layout);
 
 /// <summary>Storage decisions for one entity.</summary>
 public sealed record EntityStructure(string Name, IReadOnlyList<AttributeStructure> Attributes)
@@ -63,7 +63,7 @@ public sealed record StructureModel(IReadOnlyList<EntityStructure> Entities)
             .Select(e => new EntityStructure(
                 e.Name,
                 e.Attributes
-                    .Select(a => new AttributeStructure(a.Name, a.Time, AttributeLayouts.AllowedFor(a.Time)[0]))
+                    .Select(a => new AttributeStructure(a.Name, a.Type, a.Time, AttributeLayouts.AllowedFor(a.Time)[0]))
                     .ToList()))
             .ToList());
 

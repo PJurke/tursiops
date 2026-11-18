@@ -10,7 +10,7 @@ using Tursiops.Core.Format;
 using Tursiops.Core.Storage;
 using Tursiops.Core.Storage.Sqlite;
 
-const string Ontology = "Mensch {\n  Körpergröße @history\n}\n";
+const string Ontology = "Mensch {\n  Körpergröße: number @history\n}\n";
 const string Entity = "Mensch";
 const string Attribute = "Körpergröße";
 

@@ -8,12 +8,6 @@ public enum SleepLogKind
     /// <summary>Which phase the sleep evaluated.</summary>
     Sleep,
 
-    /// <summary>All values set in the phase had the same technical type (E-13).</summary>
-    TypeObserved,
-
-    /// <summary>Values set in the phase had different technical types (E-13).</summary>
-    TypesMixed,
-
     /// <summary>Too few operations to decide on the layout (E-34).</summary>
     NotEnoughData,
 
@@ -43,8 +37,6 @@ internal static class SleepLogKinds
     public static string Name(SleepLogKind kind) => kind switch
     {
         SleepLogKind.Sleep => "sleep",
-        SleepLogKind.TypeObserved => "type_observed",
-        SleepLogKind.TypesMixed => "types_mixed",
         SleepLogKind.NotEnoughData => "not_enough_data",
         SleepLogKind.LayoutKept => "layout_kept",
         SleepLogKind.LayoutChanged => "layout_changed",

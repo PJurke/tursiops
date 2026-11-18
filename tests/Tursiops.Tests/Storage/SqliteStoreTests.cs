@@ -5,14 +5,24 @@ using Tursiops.Core.Storage.Sqlite;
 
 namespace Tursiops.Tests.Storage;
 
-// Tests for the translation layer to SQLite (E-21, E-23, E-25 to E-27).
+// Tests for the translation layer to SQLite (E-21, E-23, E-25 to E-27, E-41).
 public class SqliteStoreTests : IDisposable
 {
     private const string Source = """
         Mensch {
-          Name
-          Wohnort @time
-          Körpergröße @history
+          Name: text
+          Wohnort: text @time
+          Körpergröße: number @history
+        }
+        """;
+
+    private const string TypesSource = """
+        Probe {
+          Zahl: number
+          Wort: text
+          Tag: date
+          Wahr: bi
+          Messung: number @history
         }
         """;
 
@@ -30,9 +40,9 @@ public class SqliteStoreTests : IDisposable
     {
         var mensch = Assert.Single(Model().Entities);
 
-        Assert.Equal(new AttributeStructure("Name", AttributeTime.Timeless, AttributeLayout.Column), mensch.Attribute("Name"));
-        Assert.Equal(new AttributeStructure("Wohnort", AttributeTime.CurrentOnly, AttributeLayout.ColumnWithTime), mensch.Attribute("Wohnort"));
-        Assert.Equal(new AttributeStructure("Körpergröße", AttributeTime.History, AttributeLayout.HistoryTable), mensch.Attribute("Körpergröße"));
+        Assert.Equal(new AttributeStructure("Name", BaseType.Text, AttributeTime.Timeless, AttributeLayout.Column), mensch.Attribute("Name"));
+        Assert.Equal(new AttributeStructure("Wohnort", BaseType.Text, AttributeTime.CurrentOnly, AttributeLayout.ColumnWithTime), mensch.Attribute("Wohnort"));
+        Assert.Equal(new AttributeStructure("Körpergröße", BaseType.Number, AttributeTime.History, AttributeLayout.HistoryTable), mensch.Attribute("Körpergröße"));
     }
 
     [Theory] // E-25: a layout never changes the information
@@ -211,20 +221,125 @@ public class SqliteStoreTests : IDisposable
         Assert.Contains("@history", error.Message);
     }
 
+    // ---------- Base types (E-41) ----------
+
     [Fact]
-    public void ValuesKeepTheirType() // E-13
+    public void BaseTypes_SurviveClosingAndOpening()
     {
-        using var store = Memory(Model());
-        var anna = store.CreateEntity("Mensch");
+        var path = TempFile();
+        var model = TypesModel();
+        using (SqliteStore.Create(path, model)) { }
 
-        store.SetValue(anna, "Name", 42L);
-        Assert.Equal(42L, store.GetCurrentValue(anna, "Name")!.Value);
+        using var store = SqliteStore.Open(path);
+        Assert.Equal(model.Entity("Probe").Attributes, store.Structure.Entity("Probe").Attributes);
+        Assert.Equal(BaseType.Bi, store.Structure.Entity("Probe").Attribute("Wahr").Type);
+    }
 
-        store.SetValue(anna, "Name", 4.2);
-        Assert.Equal(4.2, store.GetCurrentValue(anna, "Name")!.Value);
+    [Theory]
+    [MemberData(nameof(FittingValues))]
+    public void ValuesOfTheDeclaredType_AreAccepted(string attribute, object value)
+    {
+        using var store = Memory(TypesModel());
+        var probe = store.CreateEntity("Probe");
 
-        store.SetValue(anna, "Name", "Anna");
-        Assert.Equal("Anna", store.GetCurrentValue(anna, "Name")!.Value);
+        store.SetValue(probe, attribute, value);
+
+        Assert.NotNull(store.GetCurrentValue(probe, attribute));
+    }
+
+    public static TheoryData<string, object> FittingValues() => new()
+    {
+        { "Zahl", 42 }, { "Zahl", 42L }, { "Zahl", 4.2 }, { "Zahl", 1.81m },
+        { "Wort", "Anna" }, { "Wort", "180" },
+        { "Tag", Age10 }, { "Tag", Age10.UtcDateTime }, { "Tag", new DateOnly(2016, 3, 3) },
+        { "Wahr", true }, { "Wahr", false },
+    };
+
+    [Theory]
+    [MemberData(nameof(ValuesOfAnotherType))]
+    public void ValuesOfAnotherType_AreRejected_NotConverted(string attribute, object value, string typeName)
+    {
+        using var store = Memory(TypesModel());
+        var probe = store.CreateEntity("Probe");
+
+        var error = Assert.Throws<ArgumentException>(() => store.SetValue(probe, attribute, value));
+
+        Assert.Contains($"Probe.{attribute}", error.Message);
+        Assert.Contains(typeName, error.Message);
+        Assert.Null(store.GetCurrentValue(probe, attribute));
+    }
+
+    public static TheoryData<string, object, string> ValuesOfAnotherType() => new()
+    {
+        { "Zahl", "181", "number" }, { "Zahl", true, "number" }, { "Zahl", Age10, "number" },
+        { "Wort", 181L, "text" }, { "Wort", false, "text" },
+        { "Tag", "2016-03-03", "date" }, { "Tag", 20160303L, "date" },
+        { "Wahr", 1L, "bi" }, { "Wahr", "true", "bi" },
+    };
+
+    [Fact]
+    public void TimedValueOfAnotherType_IsRejected()
+    {
+        using var store = Memory(TypesModel());
+        var probe = store.CreateEntity("Probe");
+
+        Assert.Throws<ArgumentException>(() => store.SetValue(probe, "Messung", "181", ValueTime.At(Age10)));
+
+        Assert.Empty(store.GetHistory(probe, "Messung"));
+    }
+
+    [Theory]
+    [InlineData("Zahl")]
+    [InlineData("Wort")]
+    [InlineData("Tag")]
+    public void Null_IsAllowed_ExceptForBi(string attribute)
+    {
+        using var store = Memory(TypesModel());
+        var probe = store.CreateEntity("Probe");
+
+        store.SetValue(probe, attribute, null);
+
+        Assert.Null(store.GetCurrentValue(probe, attribute));
+    }
+
+    [Fact]
+    public void Null_IsRejectedForBi()
+    {
+        using var store = Memory(TypesModel());
+        var probe = store.CreateEntity("Probe");
+        store.SetValue(probe, "Wahr", true);
+
+        var error = Assert.Throws<ArgumentException>(() => store.SetValue(probe, "Wahr", null));
+
+        Assert.Contains("bi", error.Message);
+        Assert.NotNull(store.GetCurrentValue(probe, "Wahr")); // the earlier value stays
+    }
+
+    [Fact]
+    public void BiThatWasNeverSet_HasNoValue()
+    {
+        using var store = Memory(TypesModel());
+        var probe = store.CreateEntity("Probe");
+
+        Assert.Null(store.GetCurrentValue(probe, "Wahr"));
+    }
+
+    [Fact]
+    public void DatabaseWithoutDeclaredTypes_IsRejectedOnOpening() // E-41: not converted
+    {
+        var path = TempFile();
+        using (SqliteStore.Create(path, Model())) { }
+        using (var connection = new SqliteConnection($"Data Source={path}"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE \"_tursiops_structure\" DROP COLUMN type";
+            command.ExecuteNonQuery();
+        }
+        SqliteConnection.ClearAllPools();
+
+        var error = Assert.Throws<InvalidOperationException>(() => SqliteStore.Open(path));
+        Assert.Contains("types", error.Message);
     }
 
     // ---------- Values with @time and @history ----------
@@ -237,7 +352,7 @@ public class SqliteStoreTests : IDisposable
         using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
 
-        var error = Assert.Throws<ArgumentException>(() => store.SetValue(anna, attribute, 142L));
+        var error = Assert.Throws<ArgumentException>(() => store.SetValue(anna, attribute, Typed(attribute, 142)));
         Assert.Contains("ValueTime", error.Message);
     }
 
@@ -249,7 +364,7 @@ public class SqliteStoreTests : IDisposable
         using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
 
-        store.SetValue(anna, attribute, 142L, ValueTime.Now);
+        store.SetValue(anna, attribute, Typed(attribute, 142), ValueTime.Now);
 
         Assert.Equal(Now, store.GetCurrentValue(anna, attribute)!.ValidAt);
     }
@@ -262,12 +377,12 @@ public class SqliteStoreTests : IDisposable
         using var store = Memory(Model());
         var anna = store.CreateEntity("Mensch");
 
-        store.SetValue(anna, attribute, 155L, ValueTime.At(Age12));
-        store.SetValue(anna, attribute, 168L, ValueTime.At(Age14));
-        store.SetValue(anna, attribute, 142L, ValueTime.At(Age10));
+        store.SetValue(anna, attribute, Typed(attribute, 155), ValueTime.At(Age12));
+        store.SetValue(anna, attribute, Typed(attribute, 168), ValueTime.At(Age14));
+        store.SetValue(anna, attribute, Typed(attribute, 142), ValueTime.At(Age10));
 
         var current = store.GetCurrentValue(anna, attribute);
-        Assert.Equal(168L, current!.Value);
+        Assert.Equal(Typed(attribute, 168), current!.Value);
         Assert.Equal(Age14, current.ValidAt);
     }
 
@@ -326,7 +441,7 @@ public class SqliteStoreTests : IDisposable
         var anna = store.CreateEntity("Mensch");
         var berlin = new DateTimeOffset(2016, 3, 3, 9, 30, 0, TimeSpan.FromHours(1));
 
-        store.SetValue(anna, attribute, 142L, ValueTime.At(berlin));
+        store.SetValue(anna, attribute, Typed(attribute, 142), ValueTime.At(berlin));
 
         var stored = store.GetCurrentValue(anna, attribute)!.ValidAt!.Value;
         Assert.Equal(berlin, stored);
@@ -336,6 +451,11 @@ public class SqliteStoreTests : IDisposable
     // ---------- Helpers ----------
 
     private static StructureModel Model() => StructureModel.FromOntology(TurParser.Parse(Source).Ontology);
+
+    private static StructureModel TypesModel() => StructureModel.FromOntology(TurParser.Parse(TypesSource).Ontology);
+
+    // A value of the declared type (E-41): Wohnort is text, Körpergröße a number.
+    private static object Typed(string attribute, long n) => attribute == "Wohnort" ? $"Ort {n}" : n;
 
     private static SqliteStore Memory(StructureModel model) =>
         SqliteStore.Create(":memory:", model, new FixedTimeProvider(Now));

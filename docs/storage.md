@@ -1,6 +1,6 @@
 # Storage in SQLite
 
-How the translation layer in `src/Tursiops.Core/Storage/Sqlite` lays out a Tursiops database in SQLite. The reasons behind it are recorded in the project's decision log (E-06, E-13, E-21, E-23, E-25 to E-35, E-37, E-38, E-40).
+How the translation layer in `src/Tursiops.Core/Storage/Sqlite` lays out a Tursiops database in SQLite. The reasons behind it are recorded in the project's decision log (E-06, E-21, E-23, E-25 to E-35, E-37, E-38, E-40, E-41).
 
 Only the translation layer knows tables and SQL. Everything else works with entities, attributes and storage layouts. Which layouts exist for which attribute is described in `StructureModel.cs`.
 
@@ -20,18 +20,22 @@ The structure model is stored in the same file, so a database stays a single fil
 | Table | Columns | Contents |
 |---|---|---|
 | `_tursiops_entities` | `entity`, `position` | Entities in ontology order |
-| `_tursiops_structure` | `entity`, `attribute`, `position`, `time`, `layout` | Per attribute: its time behavior (`Timeless`, `CurrentOnly`, `History`) and its storage layout |
+| `_tursiops_structure` | `entity`, `attribute`, `position`, `type`, `time`, `layout` | Per attribute: its declared base type (`number`, `text`, `date`, `bi`), its time behavior (`Timeless`, `CurrentOnly`, `History`) and its storage layout |
 | `_tursiops_phases` | `phase`, `started_at`, `started_offset` | Waking phases, from one sleep to the next, and when each began (see [Observation](#observation)) |
 | `_tursiops_observations` | `phase`, `entity`, `attribute`, `counter`, `count` | Per phase and attribute: how often each counter was hit (see [Observation](#observation)) |
 | `_tursiops_sleep_log` | `entry`, `phase`, `logged_at`, `logged_offset`, `kind`, `entity`, `attribute`, `summary`, `details` | Every decision of the sleep in readable English, per evaluated phase (see [Sleep](#sleep)) |
 
 A change of layout changes tables and catalog in one transaction. SQLite rolls back schema changes together with the transaction (covered by tests).
 
+Files from before declared types (decision log E-41) have no column `type` in `_tursiops_structure`. Opening them fails with a message that asks to declare the types in the ontology and create the database again; Tursiops does not guess types from the stored values.
+
 ## Entity tables
 
 One table per entity, named like the entity. `_id INTEGER PRIMARY KEY` is the internal key: an increasing integer handed out when the entity is created. It is not meant to be visible to applications.
 
-Value columns have no declared type. SQLite keeps the type of each value as it was written. Accepted values are numbers, text, dates (`DateTimeOffset`, `DateTime`, `DateOnly`) and booleans; other types are rejected. SQLite returns booleans as numbers and dates as text, so the technical type of a value is only known when it comes in (see [Observation](#observation)).
+Value columns have no declared type in SQLite; Tursiops checks each value against the attribute's base type before writing (`ValueTypes.Check`, decision log E-41). Numbers (any .NET number type) fit `number`, `string` fits `text`, `DateTimeOffset`, `DateTime` and `DateOnly` fit `date`, `bool` fits `bi`. A value of another type is rejected, not converted, and the failed operation is not counted. `null` is rejected only for `bi`. Other .NET types are always rejected.
+
+SQLite keeps the type of each value as it was written, but returns booleans as numbers and dates as text. Reading returns what SQLite returns.
 
 ## Layouts
 
@@ -79,9 +83,8 @@ Tursiops counts per attribute how it is used, without changing anything. The sle
 | `read_current` | the current value of one entity is read |
 | `read_current_all` | the current values of all entities are read; counted once per read, not per entity |
 | `read_history` | the history of one entity is read |
-| `type_number`, `type_text`, `type_date`, `type_boolean` | a value of that technical type is set; `null` has no type. Text stays text, even if it looks like a number |
 
-Creating an entity is not counted, nor is an operation that fails. Changing the layout does not change any counter. Operations inside a scope opened with `SqliteStore.Unobserved()` are not counted either; it is meant for checks that are not use of the data, such as the demo comparing all values before and after each sleep (decision log E-40).
+Creating an entity is not counted, nor is an operation that fails, e.g. a value of another type than declared. Changing the layout does not change any counter. Operations inside a scope opened with `SqliteStore.Unobserved()` are not counted either; it is meant for checks that are not use of the data, such as the demo comparing all values before and after each sleep (decision log E-40).
 
 Counts belong to a waking phase, from one sleep to the next. The first phase is 1. `StartNewPhase` ends the current phase and starts the next one at zero; earlier phases are kept.
 
@@ -93,9 +96,8 @@ Counts are kept in memory and written to the file in one transaction when the st
 
 1. writes the counts kept in memory to the file,
 2. reads the counts of the current waking phase and, from the tables, the number of entities and of stored values per attribute,
-3. logs the technical types of the values set in the phase (E-13): one type, or several types with their counts. Nothing is rejected or converted,
-4. decides the layout of every attribute with `@history` (E-34, below),
-5. changes the layouts, writes the log and starts the next waking phase, all in one transaction (`SqliteStore.InOneTransaction`). If a step fails, file and store stay as before.
+3. decides the layout of every attribute with `@history` (E-34, below),
+4. changes the layouts, writes the log and starts the next waking phase, all in one transaction (`SqliteStore.InOneTransaction`). If a step fails, file and store stay as before.
 
 ### Layout decision
 
@@ -117,13 +119,11 @@ With these numbers, H1 only wins when current values of all entities are read of
 
 ### Log
 
-`_tursiops_sleep_log` keeps one row per entry, in the order written (`entry`). `phase` is the waking phase the sleep evaluated, `logged_at` and `logged_offset` when the entry was written (stored like valid times). `entity` and `attribute` are empty for entries about the whole sleep. `summary` says in plain words what Tursiops did and what it means for the developer; `details` gives the reason in one sentence, then the numbers it rests on, and may be empty (decision log E-37). Files from before kept one column `message`; on opening it becomes `summary`, with empty `details`. `kind` is one of:
+`_tursiops_sleep_log` keeps one row per entry, in the order written (`entry`). `phase` is the waking phase the sleep evaluated, `logged_at` and `logged_offset` when the entry was written (stored like valid times). `entity` and `attribute` are empty for entries about the whole sleep. `summary` says in plain words what Tursiops did and what it means for the developer; `details` gives the reason in one sentence, then the numbers it rests on, and may be empty (decision log E-37). `kind` is one of:
 
 | Kind | Entry |
 |---|---|
 | `sleep` | which phase was evaluated, how many layouts changed and stayed |
-| `type_observed` | all values set in the phase had one technical type |
-| `types_mixed` | values set in the phase had several technical types, with their counts |
 | `not_enough_data` | fewer operations than needed, no layout decision |
 | `layout_kept` | the numbers of the decision, the layout stays |
 | `layout_changed` | the numbers of the decision, the layout changed |

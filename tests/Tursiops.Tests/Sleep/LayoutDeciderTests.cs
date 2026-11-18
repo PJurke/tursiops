@@ -122,7 +122,7 @@ public class LayoutDeciderTests
     public void AttributesWithOneLayout_AreRefused(AttributeTime time, AttributeLayout layout)
     {
         Assert.Throws<ArgumentException>(() => LayoutDecider.Decide(
-            new AttributeStructure("Name", time, layout), "Mensch", Observed(writes: 1_000), 1, 1, Costs, Rule));
+            new AttributeStructure("Name", BaseType.Text, time, layout), "Mensch", Observed(writes: 1_000), 1, 1, Costs, Rule));
     }
 
     [Fact]
@@ -194,7 +194,7 @@ public class LayoutDeciderTests
     }
 
     private static LayoutDecision Decide(AttributeLayout layout, AttributeObservations observed, long entities, long values) =>
-        LayoutDecider.Decide(new AttributeStructure("Körpergröße", AttributeTime.History, layout), "Mensch",
+        LayoutDecider.Decide(new AttributeStructure("Körpergröße", BaseType.Number, AttributeTime.History, layout), "Mensch",
             observed, entities, values, Costs, Rule);
 
     private static AttributeObservations Observed(

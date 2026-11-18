@@ -27,22 +27,22 @@ public class TurParserTests
     {
         var ontology = Parse("""
             Mensch {
-              Name
-              Körpergröße @time
+              Name: text
+              Körpergröße: number @time
             }
             """);
 
         var mensch = Assert.Single(ontology.Entities);
         Assert.Equal("Mensch", mensch.Name);
         Assert.Collection(mensch.Attributes,
-            a => { Assert.Equal("Name", a.Name); Assert.Empty(a.Annotations); Assert.Equal(AttributeTime.Timeless, a.Time); },
-            a => { Assert.Equal("Körpergröße", a.Name); Assert.Equal(["time"], a.Annotations); Assert.Equal(AttributeTime.CurrentOnly, a.Time); });
+            a => { Assert.Equal("Name", a.Name); Assert.Equal(BaseType.Text, a.Type); Assert.Empty(a.Annotations); Assert.Equal(AttributeTime.Timeless, a.Time); },
+            a => { Assert.Equal("Körpergröße", a.Name); Assert.Equal(BaseType.Number, a.Type); Assert.Equal(["time"], a.Annotations); Assert.Equal(AttributeTime.CurrentOnly, a.Time); });
     }
 
     [Fact]
     public void Positions_AreOneBasedLineAndColumn()
     {
-        var ontology = Parse("// header\nMensch {\n  Name\n}");
+        var ontology = Parse("// header\nMensch {\n  Name: text\n}");
 
         var mensch = Assert.Single(ontology.Entities);
         Assert.Equal(new SourcePosition(2, 1), mensch.Position);
@@ -55,15 +55,15 @@ public class TurParserTests
         var ontology = Parse("""
             // People
             Mensch {
-              Name
+              Name: text
 
               // height changes
-              Körpergröße @time
+              Körpergröße: number @time
             }
 
 
             Tier {
-              Art
+              Art: text
             }
             """);
 
@@ -75,7 +75,7 @@ public class TurParserTests
     [Fact]
     public void NamesMayContainUnicodeLettersDigitsAndUnderscore()
     {
-        var ontology = Parse("Straße_2 {\n  Ölstand_1\n  Größe3 @time\n}");
+        var ontology = Parse("Straße_2 {\n  Ölstand_1: number\n  Größe3: number @time\n}");
 
         var entity = Assert.Single(ontology.Entities);
         Assert.Equal("Straße_2", entity.Name);
@@ -87,7 +87,7 @@ public class TurParserTests
     {
         // "Größe" once with precomposed umlauts, once as letter + combining diaeresis.
         var decomposed = "Größe";
-        var ontology = Parse($"Mensch {{\n  {decomposed}\n}}");
+        var ontology = Parse($"Mensch {{\n  {decomposed}: number\n}}");
 
         Assert.Equal("Größe", Assert.Single(Assert.Single(ontology.Entities).Attributes).Name);
     }
@@ -95,7 +95,7 @@ public class TurParserTests
     [Fact]
     public void WindowsLineEndingsAndTabs_AreAccepted()
     {
-        var ontology = Parse("Mensch {\r\n\tName\r\n\tKörpergröße\t@time\r\n}\r\n");
+        var ontology = Parse("Mensch {\r\n\tName:\ttext\r\n\tKörpergröße: number\t@time\r\n}\r\n");
 
         Assert.Equal(2, Assert.Single(ontology.Entities).Attributes.Count);
     }
@@ -103,7 +103,7 @@ public class TurParserTests
     [Fact]
     public void NamesAreCaseSensitive()
     {
-        var ontology = Parse("Mensch {\n  name\n  Name\n}\nmensch {\n}");
+        var ontology = Parse("Mensch {\n  name: text\n  Name: text\n}\nmensch {\n}");
 
         Assert.Equal(2, ontology.Entities.Count);
         Assert.Equal(2, ontology.Entities[0].Attributes.Count);
@@ -112,7 +112,7 @@ public class TurParserTests
     [Fact]
     public void OpeningBrace_MayStandOnNextLine()
     {
-        var ontology = Parse("Mensch\n{\n  Name\n}");
+        var ontology = Parse("Mensch\n{\n  Name: text\n}");
 
         Assert.Single(Assert.Single(ontology.Entities).Attributes);
     }
@@ -120,7 +120,7 @@ public class TurParserTests
     [Fact]
     public void OpeningBrace_MayFollowAfterBlankAndCommentLines()
     {
-        var ontology = Parse("Mensch // a person\n\n// the brace comes next\n{\n  Name\n}");
+        var ontology = Parse("Mensch // a person\n\n// the brace comes next\n{\n  Name: text\n}");
 
         Assert.Single(Assert.Single(ontology.Entities).Attributes);
     }
@@ -141,8 +141,8 @@ public class TurParserTests
     {
         var ontology = Parse("""
             Mensch { // entity
-              Name // first and last name
-              Körpergröße @time // changes
+              Name: text // first and last name
+              Körpergröße: number @time // changes
             } // end
             """);
 
@@ -152,7 +152,7 @@ public class TurParserTests
     [Fact]
     public void ClosingBrace_MayBeIndented()
     {
-        var ontology = Parse("Mensch {\n  Name\n  }");
+        var ontology = Parse("Mensch {\n  Name: text\n  }");
         Assert.Single(ontology.Entities);
     }
 
@@ -163,7 +163,9 @@ public class TurParserTests
 
         var mensch = Assert.Single(ontology.Entities);
         Assert.Equal("Mensch", mensch.Name);
-        Assert.Equal(AttributeTime.History, mensch.Attributes.Single(a => a.Name == "Körpergröße").Time);
+        var height = mensch.Attributes.Single(a => a.Name == "Körpergröße");
+        Assert.Equal(AttributeTime.History, height.Time);
+        Assert.Equal(BaseType.Number, height.Type);
     }
 
     // ---------- Errors: braces and lines ----------
@@ -183,7 +185,7 @@ public class TurParserTests
     [Fact]
     public void MissingClosingBrace_AtEndOfFile()
     {
-        AssertError("Mensch {\n  Name\n", TurErrorKind.ExpectedClosingBrace, 3, 1);
+        AssertError("Mensch {\n  Name: text\n", TurErrorKind.ExpectedClosingBrace, 3, 1);
     }
 
     [Fact]
@@ -195,7 +197,7 @@ public class TurParserTests
     [Fact]
     public void ClosingBraceOnAttributeLine_IsAnError()
     {
-        AssertError("Mensch {\n  Name }", TurErrorKind.ExpectedLineEnd, 2, 8);
+        AssertError("Mensch {\n  Name: text }", TurErrorKind.ExpectedLineEnd, 2, 14);
     }
 
     [Fact]
@@ -205,15 +207,22 @@ public class TurParserTests
     }
 
     [Fact]
-    public void TwoWordsAsName_IsAnError()
+    public void TwoWordsAsName_IsAnError_WhereTheTypeShouldFollow()
     {
-        AssertError("Mensch {\n  Körper Größe\n}", TurErrorKind.ExpectedLineEnd, 2, 10);
+        var error = AssertError("Mensch {\n  Körper Größe: number\n}", TurErrorKind.MissingType, 2, 10);
+        Assert.Contains("spaces", error.Message);
+    }
+
+    [Fact]
+    public void WordAfterTheType_IsAnError()
+    {
+        AssertError("Mensch {\n  Körpergröße: number groß\n}", TurErrorKind.ExpectedLineEnd, 2, 23);
     }
 
     [Fact]
     public void SingleSlash_IsNotAComment()
     {
-        AssertError("Mensch {\n  Name / comment\n}", TurErrorKind.ExpectedLineEnd, 2, 8);
+        AssertError("Mensch {\n  Name: text / comment\n}", TurErrorKind.ExpectedLineEnd, 2, 14);
     }
 
     [Fact]
@@ -243,13 +252,13 @@ public class TurParserTests
     [Fact]
     public void DuplicateAttributeName_PointsToSecondOccurrence()
     {
-        AssertError("Mensch {\n  Name\n  Name\n}", TurErrorKind.DuplicateAttribute, 3, 3);
+        AssertError("Mensch {\n  Name: text\n  Name: text\n}", TurErrorKind.DuplicateAttribute, 3, 3);
     }
 
     [Fact]
     public void SameAttributeNameInDifferentEntities_IsAllowed()
     {
-        var ontology = Parse("Mensch {\n  Name\n}\nTier {\n  Name\n}");
+        var ontology = Parse("Mensch {\n  Name: text\n}\nTier {\n  Name: text\n}");
         Assert.Equal(2, ontology.Entities.Count);
     }
 
@@ -264,8 +273,90 @@ public class TurParserTests
     [Fact]
     public void NamesThatOnlyStartWithIn_AreAllowed()
     {
-        var ontology = Parse("Inventar {\n  inhalt\n  in_Arbeit\n}");
+        var ontology = Parse("Inventar {\n  inhalt: text\n  in_Arbeit: bi\n}");
         Assert.Equal(2, Assert.Single(ontology.Entities).Attributes.Count);
+    }
+
+    // ---------- Base types (E-41) ----------
+
+    [Fact]
+    public void BaseTypes_AreParsed()
+    {
+        var attributes = Assert.Single(Parse("Mensch {\n  Name: text\n  Größe: number\n  Geburtstag: date\n  Lebt: bi\n}").Entities).Attributes;
+
+        Assert.Equal([BaseType.Text, BaseType.Number, BaseType.Date, BaseType.Bi], attributes.Select(a => a.Type));
+    }
+
+    [Theory]
+    [InlineData("Mensch {\n  Name:text\n}")]
+    [InlineData("Mensch {\n  Name : text\n}")]
+    [InlineData("Mensch {\n  Name:\ttext\n}")]
+    public void SpacesAroundTheColon_AreOptional(string source)
+    {
+        Assert.Equal(BaseType.Text, Assert.Single(Assert.Single(Parse(source).Entities).Attributes).Type);
+    }
+
+    [Fact]
+    public void TypeIsFollowedByAnnotations()
+    {
+        var attribute = Assert.Single(Assert.Single(Parse("Mensch {\n  Körpergröße: number @history // cm\n}").Entities).Attributes);
+
+        Assert.Equal(BaseType.Number, attribute.Type);
+        Assert.Equal(AttributeTime.History, attribute.Time);
+    }
+
+    [Theory]
+    [InlineData("Mensch {\n  Name\n}", 2, 7)]          // line ends after the name
+    [InlineData("Mensch {\n  Name // comment\n}", 2, 8)]
+    [InlineData("Mensch {\n  Größe @time\n}", 2, 9)]   // annotation instead of the type
+    [InlineData("Mensch {\n  Größe in cm\n}", 2, 9)]   // unit instead of the type
+    [InlineData("Mensch {\n  Name:\n}", 2, 8)]         // colon without a type
+    [InlineData("Mensch {\n  Name: @time\n}", 2, 9)]
+    [InlineData("Mensch {\n  Name\n  Alter: number\n}", 2, 7)]
+    public void MissingType_IsAnError(string source, int line, int column)
+    {
+        AssertError(source, TurErrorKind.MissingType, line, column);
+    }
+
+    [Fact]
+    public void MissingType_ShowsHowToDeclareIt()
+    {
+        var error = AssertError("Mensch {\n  Größe @time\n}", TurErrorKind.MissingType, 2, 9);
+        Assert.Contains("Größe: number", error.Message);
+        Assert.Contains("number, text, date, bi", error.Message);
+    }
+
+    [Fact]
+    public void UnknownType_ListsKnownOnes()
+    {
+        var error = AssertError("Mensch {\n  Name: string\n}", TurErrorKind.UnknownType, 2, 9);
+        Assert.Contains("number, text, date, bi", error.Message);
+    }
+
+    [Theory]
+    [InlineData("Mensch {\n  Größe: Number\n}", "'number'")]
+    [InlineData("Mensch {\n  Größe: TEXT\n}", "'text'")]
+    [InlineData("Mensch {\n  Größe: Bi\n}", "'bi'")]
+    public void TypeWithWrongCase_IsUnknown_AndSuggestsCorrectSpelling(string source, string suggestion)
+    {
+        var error = AssertError(source, TurErrorKind.UnknownType, 2, 10);
+        Assert.Contains(suggestion, error.Message);
+    }
+
+    [Theory]
+    [InlineData("boolean")]
+    [InlineData("bool")]
+    public void BooleanSpelling_SuggestsBi(string type)
+    {
+        var error = AssertError($"Mensch {{\n  Lebt: {type}\n}}", TurErrorKind.UnknownType, 2, 9);
+        Assert.Contains("'bi'", error.Message);
+    }
+
+    [Fact]
+    public void TypeNamesMayBeUsedAsNames()
+    {
+        var attribute = Assert.Single(Assert.Single(Parse("Zähler {\n  number: number\n}").Entities).Attributes);
+        Assert.Equal("number", attribute.Name);
     }
 
     // ---------- Errors: annotations ----------
@@ -273,27 +364,27 @@ public class TurParserTests
     [Fact]
     public void UnknownAnnotation_PointsToAtSign()
     {
-        AssertError("Mensch {\n  Name @unique\n}", TurErrorKind.UnknownAnnotation, 2, 8);
+        AssertError("Mensch {\n  Name: text @unique\n}", TurErrorKind.UnknownAnnotation, 2, 14);
     }
 
     [Fact]
     public void AnnotationWithWrongCase_IsUnknown_AndSuggestsCorrectSpelling()
     {
-        var error = AssertError("Mensch {\n  Größe @Time\n}", TurErrorKind.UnknownAnnotation, 2, 9);
+        var error = AssertError("Mensch {\n  Größe: number @Time\n}", TurErrorKind.UnknownAnnotation, 2, 17);
         Assert.Contains("@time", error.Message);
     }
 
     [Fact]
     public void AnnotationWithWrongCase_SuggestsHistory()
     {
-        var error = AssertError("Mensch {\n  Größe @History\n}", TurErrorKind.UnknownAnnotation, 2, 9);
+        var error = AssertError("Mensch {\n  Größe: number @History\n}", TurErrorKind.UnknownAnnotation, 2, 17);
         Assert.Contains("@history", error.Message);
     }
 
     [Fact]
     public void UnknownAnnotation_ListsKnownOnes()
     {
-        var error = AssertError("Mensch {\n  Name @unique\n}", TurErrorKind.UnknownAnnotation, 2, 8);
+        var error = AssertError("Mensch {\n  Name: text @unique\n}", TurErrorKind.UnknownAnnotation, 2, 14);
         Assert.Contains("@time", error.Message);
         Assert.Contains("@history", error.Message);
     }
@@ -301,7 +392,7 @@ public class TurParserTests
     [Fact]
     public void AtSignWithoutName_IsAnError()
     {
-        AssertError("Mensch {\n  Größe @ time\n}", TurErrorKind.ExpectedName, 2, 10);
+        AssertError("Mensch {\n  Größe: number @ time\n}", TurErrorKind.ExpectedName, 2, 18);
     }
 
     // ---------- Time: @time and @history (E-24, E-25) ----------
@@ -309,7 +400,7 @@ public class TurParserTests
     [Fact]
     public void History_IsParsed()
     {
-        var result = TurParser.Parse("Mensch {\n  Körpergröße @history\n}");
+        var result = TurParser.Parse("Mensch {\n  Körpergröße: number @history\n}");
 
         var attribute = Assert.Single(Assert.Single(result.Ontology.Entities).Attributes);
         Assert.Equal(["history"], attribute.Annotations);
@@ -320,13 +411,13 @@ public class TurParserTests
     [Fact]
     public void ValidFile_HasNoWarnings()
     {
-        var result = TurParser.Parse("Mensch {\n  Name\n  Wohnort @time\n  Körpergröße @history\n}");
+        var result = TurParser.Parse("Mensch {\n  Name: text\n  Wohnort: text @time\n  Körpergröße: number @history\n}");
         Assert.Empty(result.Warnings);
     }
 
     [Theory]
-    [InlineData("Mensch {\n  Größe @time @time\n}", AttributeTime.CurrentOnly, 2, 15)]
-    [InlineData("Mensch {\n  Größe @history @history\n}", AttributeTime.History, 2, 18)]
+    [InlineData("Mensch {\n  Größe: number @time @time\n}", AttributeTime.CurrentOnly, 2, 23)]
+    [InlineData("Mensch {\n  Größe: number @history @history\n}", AttributeTime.History, 2, 26)]
     public void DuplicateAnnotation_IsAWarning_AtSecondOccurrence(string source, AttributeTime time, int line, int column)
     {
         var result = TurParser.Parse(source);
@@ -338,8 +429,8 @@ public class TurParserTests
     }
 
     [Theory]
-    [InlineData("Mensch {\n  Größe @time @history\n}", 2, 9)]
-    [InlineData("Mensch {\n  Größe @history @time\n}", 2, 18)]
+    [InlineData("Mensch {\n  Größe: number @time @history\n}", 2, 17)]
+    [InlineData("Mensch {\n  Größe: number @history @time\n}", 2, 26)]
     public void TimeTogetherWithHistory_IsAWarning_AtTheTimeAnnotation(string source, int line, int column)
     {
         var result = TurParser.Parse(source);
@@ -352,34 +443,34 @@ public class TurParserTests
     [Fact]
     public void Warnings_DoNotStopParsing_AndAreCollectedInFileOrder()
     {
-        var result = TurParser.Parse("Mensch {\n  Wohnort @time @time\n  Körpergröße @time @history\n}\nTier {\n  Gewicht @history @history\n}");
+        var result = TurParser.Parse("Mensch {\n  Wohnort: text @time @time\n  Körpergröße: number @time @history\n}\nTier {\n  Gewicht: number @history @history\n}");
 
         Assert.Equal(2, result.Ontology.Entities.Count);
         Assert.Collection(result.Warnings,
-            w => AssertWarning(w, TurWarningKind.DuplicateAnnotation, 2, 17),
-            w => AssertWarning(w, TurWarningKind.RedundantTime, 3, 15),
-            w => AssertWarning(w, TurWarningKind.DuplicateAnnotation, 6, 20));
+            w => AssertWarning(w, TurWarningKind.DuplicateAnnotation, 2, 23),
+            w => AssertWarning(w, TurWarningKind.RedundantTime, 3, 23),
+            w => AssertWarning(w, TurWarningKind.DuplicateAnnotation, 6, 28));
     }
 
     [Fact]
     public void ErrorAfterAWarning_StillStopsParsing()
     {
-        AssertError("Mensch {\n  Größe @time @time\n  Name @unique\n}", TurErrorKind.UnknownAnnotation, 3, 8);
+        AssertError("Mensch {\n  Größe: number @time @time\n  Name: text @unique\n}", TurErrorKind.UnknownAnnotation, 3, 14);
     }
 
     [Fact]
     public void WarningMessage_StartsWithLineAndColumn()
     {
-        var warning = Assert.Single(TurParser.Parse("Mensch {\n  Größe @time @time\n}").Warnings);
-        Assert.StartsWith("Line 2, column 15: ", warning.ToString());
+        var warning = Assert.Single(TurParser.Parse("Mensch {\n  Größe: number @time @time\n}").Warnings);
+        Assert.StartsWith("Line 2, column 23: ", warning.ToString());
     }
 
     // ---------- Units (recognized, but not supported yet) ----------
 
     [Theory]
-    [InlineData("Mensch {\n  Körpergröße in cm\n}", 2, 15)]
-    [InlineData("Mensch {\n  Körpergröße in cm @time\n}", 2, 15)]
-    [InlineData("Wetter {\n  Temperatur in °C @time\n}", 2, 14)]
+    [InlineData("Mensch {\n  Körpergröße: number in cm\n}", 2, 23)]
+    [InlineData("Mensch {\n  Körpergröße: number in cm @time\n}", 2, 23)]
+    [InlineData("Wetter {\n  Temperatur: number in °C @time\n}", 2, 22)]
     public void Units_AreRecognized_ButNotYetSupported(string source, int line, int column)
     {
         var error = AssertError(source, TurErrorKind.UnitsNotSupported, line, column);
@@ -391,7 +482,7 @@ public class TurParserTests
     [Fact]
     public void ErrorMessage_StartsWithLineAndColumn()
     {
-        var error = Assert.Throws<TurSyntaxException>(() => Parse("Mensch {\n  Name\n  Name\n}"));
+        var error = Assert.Throws<TurSyntaxException>(() => Parse("Mensch {\n  Name: text\n  Name: text\n}"));
         Assert.StartsWith("Line 3, column 3: ", error.Message);
     }
 

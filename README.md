@@ -14,13 +14,15 @@ Files end with `.tur`:
 
 ```
 Mensch {
-  Name                    // timeless: only the last value written counts
-  Wohnort @time           // only the current state counts, by the time it was valid
-  Körpergröße @history    // every value is kept with the time it was valid
+  Name: text                      // timeless: only the last value written counts
+  Wohnort: text @time             // only the current state counts, by the time it was valid
+  Körpergröße: number @history    // every value is kept with the time it was valid
 }
 ```
 
-Entity and attribute names are free to choose, in any language; keywords and annotations such as `@time` are English.
+Every attribute declares its base type after a colon: `number`, `text`, `date` or `bi` (true or false). Values of another type are rejected, not converted.
+
+Entity and attribute names are free to choose, in any language; keywords, types and annotations such as `@time` are English.
 
 Redundant annotations such as `@time @time`, or `@time` next to `@history`, are reported as warnings and do not stop parsing.
 

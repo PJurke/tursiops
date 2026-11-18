@@ -24,6 +24,12 @@ public enum TurErrorKind
     /// <summary>An attribute with this name already exists in the entity.</summary>
     DuplicateAttribute,
 
+    /// <summary>The attribute has no type: <c>:</c> and a base type must follow the name (E-41).</summary>
+    MissingType,
+
+    /// <summary>The type after <c>:</c> is not a known base type (E-41).</summary>
+    UnknownType,
+
     /// <summary>The annotation is unknown.</summary>
     UnknownAnnotation,
 

@@ -18,10 +18,12 @@ public sealed record EntityDefinition(
     IReadOnlyList<AttributeDefinition> Attributes,
     SourcePosition Position);
 
-/// <summary>An attribute of an entity, such as <c>Körpergröße @history</c>.</summary>
+/// <summary>An attribute of an entity, such as <c>Körpergröße: number @history</c>.</summary>
+/// <param name="Type">The base type the admin declared (E-41).</param>
 /// <param name="Annotations">Annotation names without <c>@</c>, in file order, each at most once.</param>
 public sealed record AttributeDefinition(
     string Name,
+    BaseType Type,
     IReadOnlyList<string> Annotations,
     SourcePosition Position)
 {
@@ -30,6 +32,46 @@ public sealed record AttributeDefinition(
         Annotations.Contains(Annotation.History) ? AttributeTime.History
         : Annotations.Contains(Annotation.Time) ? AttributeTime.CurrentOnly
         : AttributeTime.Timeless;
+}
+
+/// <summary>
+/// The base type of an attribute (E-41). The admin declares it; Tursiops never derives it.
+/// It is content, like time (E-25): values of another type are rejected, not converted.
+/// </summary>
+public enum BaseType
+{
+    /// <summary><c>number</c>: whole numbers and decimals.</summary>
+    Number,
+
+    /// <summary><c>text</c>: text, even if it looks like a number.</summary>
+    Text,
+
+    /// <summary><c>date</c>: a point in time.</summary>
+    Date,
+
+    /// <summary><c>bi</c>: two-valued, only <c>true</c> or <c>false</c>.</summary>
+    Bi,
+}
+
+/// <summary>How base types are written in format v0.1 (E-41).</summary>
+public static class BaseTypes
+{
+    /// <summary>The name of a base type in a .tur file.</summary>
+    public static string Name(BaseType type) => type switch
+    {
+        BaseType.Number => "number",
+        BaseType.Text => "text",
+        BaseType.Date => "date",
+        BaseType.Bi => "bi",
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
+    };
+
+    /// <summary>All base types in the order the documentation lists them.</summary>
+    public static IReadOnlyList<BaseType> All { get; } = [BaseType.Number, BaseType.Text, BaseType.Date, BaseType.Bi];
+
+    /// <summary>The base type with this exact name, or <c>null</c>. Names are case-sensitive.</summary>
+    public static BaseType? FromName(string name) =>
+        All.Cast<BaseType?>().FirstOrDefault(t => Name(t!.Value) == name);
 }
 
 /// <summary>

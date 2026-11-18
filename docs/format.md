@@ -1,15 +1,15 @@
 # Ontology format v0.1
 
-Specification of the `.tur` format the parser in `src/Tursiops.Core/Format` implements. The reasons behind it are recorded in the project's decision log (E-07, E-09, E-11, E-16, E-24, E-25).
+Specification of the `.tur` format the parser in `src/Tursiops.Core/Format` implements. The reasons behind it are recorded in the project's decision log (E-07, E-09, E-11, E-16, E-24, E-25, E-41).
 
 ## Example
 
 ```
 // Example ontology
 Mensch {
-  Name                    // timeless: only the last value written counts
-  Wohnort @time           // only the current state counts, by the time it was valid
-  Körpergröße @history    // every value is kept with the time it was valid
+  Name: text                      // timeless: only the last value written counts
+  Wohnort: text @time             // only the current state counts, by the time it was valid
+  Körpergröße: number @history    // every value is kept with the time it was valid
 }
 ```
 
@@ -23,7 +23,8 @@ Mensch {
 ```ebnf
 file       = { entity } ;
 entity     = name "{" ( "}" | line_end { attribute } "}" ) line_end ;
-attribute  = name [ "in" unit ] { annotation } line_end ;
+attribute  = name ":" type [ "in" unit ] { annotation } line_end ;
+type       = "number" | "text" | "date" | "bi" ;
 annotation = "@" name ;
 unit       = unit_char { unit_char } ;
 name       = letter { letter | digit | "_" } ;
@@ -39,6 +40,13 @@ comment    = "//" { any_char } ;
 
 - **Braces:** The opening `{` may stand on the line of the entity name or on a later line. After `{` the line ends: one attribute per line, so `Mensch { Name }` is an error. An empty entity may be written on one line: `Mensch { }`.
 - **Comments:** `//` starts a comment that runs to the end of the line. It may end any line.
+- **Types:** Every attribute declares a base type after a colon, before unit and annotations: `Körpergröße: number @history`. Spaces around the colon are optional.
+  - `number`: whole numbers and decimals.
+  - `text`: text, even if it looks like a number.
+  - `date`: a point in time.
+  - `bi`: two-valued, only `true` or `false`.
+  - Types are case-sensitive; for `Number` the error message suggests `number`, for `boolean` or `bool` it suggests `bi`. A missing or unknown type is an error. Type names are not reserved and may be used as names.
+  - The type is part of the information (decision log E-41). Tursiops rejects values of another type when they are written and never converts them, so `"181"` is rejected for a `number`. `null` is accepted for `number`, `text` and `date`, not for `bi`. Any attribute may have no value because it was never set.
 - **Names:** contain no spaces, start with a letter and are case-sensitive. Entity names are unique per file, attribute names unique per entity. `in` is a keyword and cannot be a name.
 - **Annotations:** `@time` and `@history` are known. Annotations are case-sensitive; for `@Time` the error message suggests `@time`. Any other annotation is an error.
 - **Meaning of the annotations:**

@@ -12,9 +12,9 @@ public class SleeperTests : IDisposable
 {
     private const string Source = """
         Mensch {
-          Name
-          Wohnort @time
-          Körpergröße @history
+          Name: text
+          Wohnort: text @time
+          Körpergröße: number @history
         }
         """;
 
@@ -99,28 +99,6 @@ public class SleeperTests : IDisposable
     }
 
     [Fact]
-    public void LogFromBeforeE37_WithOneMessageColumn_IsReadAsSummary()
-    {
-        var path = TempFile();
-        using (var store = Create(path))
-        {
-            Fill(store, people: 1, valuesEach: 1);
-            Sleeper.Run(store);
-        }
-        Execute(path,
-            "ALTER TABLE _tursiops_sleep_log DROP COLUMN details; " +
-            "ALTER TABLE _tursiops_sleep_log RENAME COLUMN summary TO message; " +
-            "UPDATE _tursiops_sleep_log SET message = 'An entry from before.'");
-
-        using var reopened = SqliteStore.Open(path);
-        Assert.All(reopened.GetSleepLog(), r =>
-        {
-            Assert.Equal("An entry from before.", r.Entry.Summary);
-            Assert.Equal("", r.Entry.Details);
-        });
-    }
-
-    [Fact]
     public void OnlyAttributesWithHistory_GetALayoutDecision() // E-30
     {
         using var store = Create(TempFile());
@@ -132,24 +110,17 @@ public class SleeperTests : IDisposable
     }
 
     [Fact]
-    public void Types_AreLogged_AndMixedTypesAreNamed() // E-13
+    public void OnlyLayoutDecisionsAreLogged_NoTypes() // E-41: types are declared, not observed
     {
         using var store = Create(TempFile());
         var anna = store.CreateEntity("Mensch");
         store.SetValue(anna, "Name", "Anna");
         store.SetValue(anna, "Körpergröße", 142L, ValueTime.At(Birth));
-        store.SetValue(anna, "Körpergröße", 155.5, ValueTime.At(Birth.AddYears(2)));
-        store.SetValue(anna, "Körpergröße", "groß", ValueTime.At(Birth.AddYears(4)));
 
         var entries = Sleeper.Run(store).Entries;
 
-        var name = Assert.Single(entries, e => e.Attribute == "Name");
-        Assert.Equal(SleepLogKind.TypeObserved, name.Kind);
-        Assert.Contains("is a text", name.Message);
-        var height = Assert.Single(entries, e => e.Attribute == "Körpergröße" && e.Kind == SleepLogKind.TypesMixed);
-        Assert.Contains("2 numbers, 1 text", height.Message);
-        Assert.Contains("1 value of other types", height.Message);
-        Assert.Equal("groß", store.GetCurrentValue(anna, "Körpergröße")!.Value);
+        Assert.DoesNotContain(entries, e => e.Attribute == "Name");
+        Assert.All(entries.Skip(1), e => Assert.Equal("Körpergröße", e.Attribute));
     }
 
     [Fact]

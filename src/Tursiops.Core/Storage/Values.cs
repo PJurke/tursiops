@@ -1,3 +1,5 @@
+using Tursiops.Core.Format;
+
 namespace Tursiops.Core.Storage;
 
 /// <summary>Reference to one stored entity, e.g. one person (E-23: internal integer key).</summary>
@@ -47,5 +49,65 @@ public readonly struct ValueTime
         Kind.Now => "now",
         Kind.At => _at.ToString("O"),
         _ => "missing",
+    };
+}
+
+/// <summary>Checks values against the base type the admin declared (E-41). Values are never converted.</summary>
+public static class ValueTypes
+{
+    /// <summary>
+    /// The base type a value has, or <c>null</c> for a missing value.
+    /// Text stays text, even if it looks like a number.
+    /// </summary>
+    /// <exception cref="ArgumentException">The value has a .NET type Tursiops does not accept.</exception>
+    public static BaseType? Of(object? value) => value switch
+    {
+        null or DBNull => null,
+        sbyte or byte or short or ushort or int or uint or long or ulong or float or double or decimal => BaseType.Number,
+        string => BaseType.Text,
+        DateTimeOffset or DateTime or DateOnly => BaseType.Date,
+        bool => BaseType.Bi,
+        _ => throw new ArgumentException(
+            $"Values of type {value.GetType().Name} are not supported. " +
+            "Use a number, text, a date (DateTimeOffset, DateTime, DateOnly) or a boolean.", nameof(value)),
+    };
+
+    /// <summary>Rejects a value that does not fit the declared type of <paramref name="entity"/>.<paramref name="attribute"/>.</summary>
+    /// <exception cref="ArgumentException">The value has another type, or it is null for a <c>bi</c> attribute.</exception>
+    public static void Check(string entity, string attribute, BaseType declared, object? value)
+    {
+        var type = Of(value);
+        var name = BaseTypes.Name(declared);
+
+        if (type is null)
+        {
+            if (declared == BaseType.Bi)
+                throw new ArgumentException(
+                    $"'{entity}.{attribute}' is declared as '{name}' and only takes true or false, not null. " +
+                    "Leave it unset if the value is not known.", nameof(value));
+            return;
+        }
+
+        if (type != declared)
+            throw new ArgumentException(
+                $"'{entity}.{attribute}' is declared as '{name}', but the value {Show(value)} is {Article(type.Value)}. " +
+                $"Tursiops does not convert values; pass {Article(declared)}.", nameof(value));
+    }
+
+    private static string Article(BaseType type) => type switch
+    {
+        BaseType.Number => "a number",
+        BaseType.Text => "text",
+        BaseType.Date => "a date",
+        BaseType.Bi => "true or false",
+        _ => type.ToString(),
+    };
+
+    private static string Show(object? value) => value switch
+    {
+        string text => $"\"{text}\"",
+        bool b => b ? "true" : "false",
+        IFormattable f => f.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+        _ => value?.ToString() ?? "null",
     };
 }

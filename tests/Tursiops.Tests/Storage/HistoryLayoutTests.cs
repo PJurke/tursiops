@@ -11,9 +11,9 @@ public class HistoryLayoutTests : IDisposable
 {
     private const string Source = """
         Mensch {
-          Name
-          Wohnort @time
-          Körpergröße @history
+          Name: text
+          Wohnort: text @time
+          Körpergröße: number @history
         }
         """;
 
