@@ -39,7 +39,7 @@ Value columns have no declared type. SQLite keeps the type of each value as it w
 |---|---|---|
 | `Column` | no annotation | Column `<Attribute>` in the entity table. Writing replaces the value. |
 | `ColumnWithTime` | `@time` | Columns `<Attribute>`, `<Attribute>._valid_at` and `<Attribute>._valid_offset` in the entity table. A write only replaces the value if its valid time is not older than the stored one. |
-| `HistoryTable` (H2) | `@history` | History table `<Entity>.<Attribute>` (see below). Every write adds a row. The current value is the row with the latest valid time. Initial layout for `@history`. |
+| `HistoryTable` (H2) | `@history` | History table `<Entity>.<Attribute>` (see below). Every write adds a row. The current value is the row with the latest valid time. Initial layout for `@history` (decision log E-38). |
 | `CurrentColumnAndHistoryTable` (H1) | `@history` | Columns as in `ColumnWithTime` for the value with the latest valid time, older values in the history table. A write that is not older than the current value moves the current value into the history table and takes its place. An older value that arrives late goes straight into the history table. |
 
 The history table `<Entity>.<Attribute>` has the columns `_entity` (references `_id`), `<Attribute>`, `_valid_at` and `_valid_offset`, plus index `<Entity>.<Attribute>._by_time` on `(_entity, _valid_at)`.
@@ -81,7 +81,7 @@ Tursiops counts per attribute how it is used, without changing anything. The sle
 | `read_history` | the history of one entity is read |
 | `type_number`, `type_text`, `type_date`, `type_boolean` | a value of that technical type is set; `null` has no type. Text stays text, even if it looks like a number |
 
-Creating an entity is not counted, nor is an operation that fails. Changing the layout does not change any counter.
+Creating an entity is not counted, nor is an operation that fails. Changing the layout does not change any counter. Operations inside a scope opened with `SqliteStore.Unobserved()` are not counted either; it is meant for checks that are not use of the data, such as the demo comparing all values before and after each sleep.
 
 Counts belong to a waking phase, from one sleep to the next. The first phase is 1. `StartNewPhase` ends the current phase and starts the next one at zero; earlier phases are kept.
 
@@ -117,7 +117,7 @@ With these numbers, H1 only wins when current values of all entities are read of
 
 ### Log
 
-`_tursiops_sleep_log` keeps one row per entry, in the order written (`entry`). `phase` is the waking phase the sleep evaluated, `logged_at` and `logged_offset` when the entry was written (stored like valid times). `entity` and `attribute` are empty for entries about the whole sleep. `kind` is one of:
+`_tursiops_sleep_log` keeps one row per entry, in the order written (`entry`). `phase` is the waking phase the sleep evaluated, `logged_at` and `logged_offset` when the entry was written (stored like valid times). `entity` and `attribute` are empty for entries about the whole sleep. `summary` says in plain words what Tursiops did and what it means for the developer; `details` gives the reason in one sentence, then the numbers it rests on, and may be empty (decision log E-37). Files from before kept one column `message`; on opening it becomes `summary`, with empty `details`. `kind` is one of:
 
 | Kind | Entry |
 |---|---|
@@ -128,7 +128,9 @@ With these numbers, H1 only wins when current values of all entities are read of
 | `layout_kept` | the numbers of the decision, the layout stays |
 | `layout_changed` | the numbers of the decision, the layout changed |
 
-`SqliteStore.GetSleepLog` reads the log, `tursiops log <database>` prints it.
+`SqliteStore.GetSleepLog` reads the log, `tursiops log <database>` prints it: the summary in bold when the output is a terminal (not when redirected or with `NO_COLOR` set), the details below. Both `sleep` and `log` end with a link to [`how-tursiops-decides.md`](how-tursiops-decides.md), which explains the principles for developers.
+
+For a layout decision, the reason names the counted operation where the two layouts differ most in the direction of the saving (`LayoutDecision.Driver`).
 
 ## Valid times
 

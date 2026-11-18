@@ -5,6 +5,15 @@ namespace Tursiops.Core.Sleep;
 // Cost model for the layout decision in sleep (E-34). What an operation costs depends on the target system (E-06),
 // so each translator provides its own numbers, e.g. SqliteCosts.Measured.
 
+/// <summary>The operations the layout decision weighs (E-31). Late writes are counted among writes.</summary>
+public enum CountedOperation
+{
+    Write,
+    CurrentRead,
+    AllCurrentRead,
+    HistoryRead,
+}
+
 /// <summary>Estimated cost of each counted operation in one layout, in microseconds.</summary>
 /// <param name="Write">Setting one value. Late writes are counted among writes and cost the same.</param>
 /// <param name="CurrentRead">Reading the current value of one entity.</param>
@@ -24,13 +33,23 @@ public sealed record CostModel(IReadOnlyDictionary<AttributeLayout, OperationCos
     /// <exception cref="ArgumentException">The model has no costs for that layout.</exception>
     public double Estimate(AttributeLayout layout, AttributeObservations observed, long entities)
     {
+        return EstimateParts(layout, observed, entities).Values.Sum();
+    }
+
+    /// <summary>The estimate of <see cref="Estimate"/>, split by counted operation, so the log can name what mattered most.</summary>
+    /// <exception cref="ArgumentException">The model has no costs for that layout.</exception>
+    public IReadOnlyDictionary<CountedOperation, double> EstimateParts(AttributeLayout layout, AttributeObservations observed, long entities)
+    {
         if (!Layouts.TryGetValue(layout, out var costs))
             throw new ArgumentException($"The cost model has no costs for layout {layout}.", nameof(layout));
 
-        return observed.Writes * costs.Write
-            + observed.CurrentReads * costs.CurrentRead
-            + observed.AllCurrentReads * entities * costs.AllCurrentReadPerEntity
-            + observed.HistoryReads * costs.HistoryRead;
+        return new Dictionary<CountedOperation, double>
+        {
+            [CountedOperation.Write] = observed.Writes * costs.Write,
+            [CountedOperation.CurrentRead] = observed.CurrentReads * costs.CurrentRead,
+            [CountedOperation.AllCurrentRead] = observed.AllCurrentReads * entities * costs.AllCurrentReadPerEntity,
+            [CountedOperation.HistoryRead] = observed.HistoryReads * costs.HistoryRead,
+        };
     }
 
     /// <summary>What changing the layout of an attribute with this many stored values costs, in microseconds.</summary>

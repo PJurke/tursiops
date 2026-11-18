@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Tursiops.Core\Tursiops.Core.csproj" />
+    <ProjectReference Include="..\..\src\Tursiops.Cli\Tursiops.Cli.csproj" />
   </ItemGroup>
 
 </Project>

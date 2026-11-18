@@ -357,6 +357,31 @@ public class ObservationTests : IDisposable
             "SELECT count FROM _tursiops_observations WHERE attribute = 'Körpergröße' AND counter = 'read_current_all'"));
     }
 
+    [Fact] // E-36: the demo's checks before and after a sleep are not use of the data
+    public void InsideUnobserved_NothingIsCounted_AndCountingResumesAfterwards()
+    {
+        using var store = Memory(H2);
+        var anna = store.CreateEntity("Mensch");
+        store.SetValue(anna, "Körpergröße", 155L, ValueTime.At(Age12));
+
+        using (store.Unobserved())
+        {
+            using (store.Unobserved())
+                store.GetHistory(anna, "Körpergröße");
+            store.GetCurrentValue(anna, "Körpergröße");
+            store.GetCurrentValues("Mensch", "Körpergröße");
+            store.SetValue(anna, "Körpergröße", 168L, ValueTime.At(Age14));
+        }
+        store.GetHistory(anna, "Körpergröße");
+
+        var height = store.GetObservations("Mensch", "Körpergröße");
+        Assert.Equal(1, height.Writes);
+        Assert.Equal(1, height.Numbers);
+        Assert.Equal(0, height.CurrentReads);
+        Assert.Equal(0, height.AllCurrentReads);
+        Assert.Equal(1, height.HistoryReads);
+    }
+
     // ---------- Helpers ----------
 
     private static StructureModel Model(AttributeLayout history) =>

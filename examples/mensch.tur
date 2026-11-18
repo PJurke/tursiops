@@ -1,4 +1,4 @@
-// Example ontology for the first prototype (E-02, E-24)
+// Example ontology for the first prototype (E-36, E-24)
 Mensch {
   Name
   Wohnort @time

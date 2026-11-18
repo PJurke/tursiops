@@ -80,7 +80,9 @@ public class LayoutDeciderTests
         Assert.Equal(LayoutOutcome.Kept, decision.Outcome);
         Assert.Equal(H1, decision.Best);
         Assert.True(decision.Saving < 0);
-        Assert.Contains("H1 would cost 1.0 ms more. Kept H2", decision.Describe());
+        Assert.StartsWith("Mensch.Körpergröße stays stored as H2", decision.Summary());
+        Assert.StartsWith("H2 is already the cheaper layout", decision.Details());
+        Assert.EndsWith("H1 would cost 1.0 ms more.", decision.Details());
     }
 
     [Fact]
@@ -133,7 +135,7 @@ public class LayoutDeciderTests
         Assert.Contains("1,200 writes (3 of them late)", text);
         Assert.Contains("100 reads of all 1,000 current values", text);
         Assert.Contains("20 %", text);
-        Assert.Contains("Changed to H1", text);
+        Assert.Contains("is now stored as H1", text);
     }
 
     [Fact]
@@ -143,7 +145,41 @@ public class LayoutDeciderTests
 
         Assert.Contains("7 operations", text);
         Assert.Contains("at least 100", text);
-        Assert.Contains("Kept H2", text);
+        Assert.Contains("stays stored as H2", text);
+    }
+
+    [Fact] // E-37: what happened first, then the reason, then the numbers
+    public void Changed_SummarySaysWhatItMeans_DetailsStartWithTheReason()
+    {
+        var decision = Decide(H2, Observed(writes: 10, allReads: 100), entities: 1_000, values: 2_000);
+
+        Assert.Equal(
+            "Mensch.Körpergröße is now stored as H1 (current value in entity row). The information and how you read it are unchanged.",
+            decision.Summary());
+        Assert.Equal(CountedOperation.AllCurrentRead, decision.Driver);
+        Assert.StartsWith("Reading the current values of all entities is cheaper in H1", decision.Details());
+        Assert.Equal($"{decision.Summary()} {decision.Details()}", decision.Describe());
+    }
+
+    [Fact] // E-37
+    public void Kept_WithASavingBelowTheThreshold_NamesWhereTheOtherLayoutIsCheaper()
+    {
+        // As in SavingBelowTheMinimumShare_KeepsTheLayout: H1 saves 500 on reading all, loses 100 on writes.
+        var decision = Decide(H2, Observed(writes: 100, allReads: 10), entities: 100, values: 0);
+
+        Assert.Equal(CountedOperation.AllCurrentRead, decision.Driver);
+        Assert.StartsWith("Mensch.Körpergröße stays stored as H2", decision.Summary());
+        Assert.StartsWith(
+            "H1 would be cheaper, mainly for reading the current values of all entities, but not by enough", decision.Details());
+    }
+
+    [Fact] // E-37
+    public void NotEnoughData_HasNoReason()
+    {
+        var decision = Decide(H2, Observed(writes: 7), entities: 1, values: 7);
+
+        Assert.Null(decision.Driver);
+        Assert.StartsWith("This waking phase had too little use to decide", decision.Details());
     }
 
     [Fact]

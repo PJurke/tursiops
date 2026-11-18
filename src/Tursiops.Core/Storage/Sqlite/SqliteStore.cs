@@ -15,6 +15,7 @@ public sealed class SqliteStore : IDisposable
     private readonly TimeProvider _time;
     private SqliteTransaction? _transaction;
     private readonly PendingObservations _pending = new();
+    private int _unobserved;
 
     private SqliteStore(SqliteConnection connection, StructureModel structure, TimeProvider time, long phase)
     {
@@ -379,7 +380,34 @@ public sealed class SqliteStore : IDisposable
         return next;
     }
 
-    private void Observe(string entity, string attribute, Counter counter) => _pending.Add(entity, attribute, counter);
+    /// <summary>
+    /// Within the returned scope, operations are not counted (E-31). For checks that are not use of the data,
+    /// such as the demo comparing all values before and after a sleep (E-36). Scopes may be nested.
+    /// </summary>
+    public IDisposable Unobserved()
+    {
+        _unobserved++;
+        return new UnobservedScope(this);
+    }
+
+    private sealed class UnobservedScope(SqliteStore store) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            store._unobserved--;
+        }
+    }
+
+    private void Observe(string entity, string attribute, Counter counter)
+    {
+        if (_unobserved == 0)
+            _pending.Add(entity, attribute, counter);
+    }
 
     private void ObserveWrite(string entity, string attribute, TechnicalType? type, bool late)
     {
@@ -480,11 +508,11 @@ public sealed class SqliteStore : IDisposable
         {
             foreach (var entry in entries)
                 Execute(
-                    $"INSERT INTO {Quote(SleepLogTable)} (phase, logged_at, logged_offset, kind, entity, attribute, message) " +
-                    "VALUES ($phase, $at, $offset, $kind, $entity, $attribute, $message)",
+                    $"INSERT INTO {Quote(SleepLogTable)} (phase, logged_at, logged_offset, kind, entity, attribute, summary, details) " +
+                    "VALUES ($phase, $at, $offset, $kind, $entity, $attribute, $summary, $details)",
                     ("$phase", phase), ("$at", ToSortableUtc(now)), ("$offset", ToOffsetMinutes(now)),
                     ("$kind", SleepLogKinds.Name(entry.Kind)), ("$entity", entry.Entity), ("$attribute", entry.Attribute),
-                    ("$message", entry.Message));
+                    ("$summary", entry.Summary), ("$details", entry.Details));
         });
     }
 
@@ -492,7 +520,7 @@ public sealed class SqliteStore : IDisposable
     public IReadOnlyList<SleepLogRecord> GetSleepLog()
     {
         using var command = Command(
-            $"SELECT phase, logged_at, logged_offset, kind, entity, attribute, message FROM {Quote(SleepLogTable)} ORDER BY entry");
+            $"SELECT phase, logged_at, logged_offset, kind, entity, attribute, summary, details FROM {Quote(SleepLogTable)} ORDER BY entry");
         using var reader = command.ExecuteReader();
         var records = new List<SleepLogRecord>();
         while (reader.Read())
@@ -503,18 +531,30 @@ public sealed class SqliteStore : IDisposable
                     SleepLogKinds.Parse(reader.GetString(3)),
                     reader.IsDBNull(4) ? null : reader.GetString(4),
                     reader.IsDBNull(5) ? null : reader.GetString(5),
-                    reader.GetString(6))));
+                    reader.GetString(6),
+                    reader.GetString(7))));
         return records;
     }
 
-    // Creates the log table if missing (also for files from before E-35).
-    private static void PrepareSleepLog(SqliteConnection connection, SqliteTransaction transaction) =>
+    // Creates the log table if missing (also for files from before E-35). Files from before E-37 kept one column `message`;
+    // it becomes the summary, with empty details.
+    private static void PrepareSleepLog(SqliteConnection connection, SqliteTransaction transaction)
+    {
         Execute(connection, transaction,
             $"CREATE TABLE IF NOT EXISTS {Quote(SleepLogTable)} (" +
             "entry INTEGER PRIMARY KEY, " +
             "phase INTEGER NOT NULL REFERENCES " + Quote(PhasesTable) + " (phase), " +
             "logged_at TEXT NOT NULL, logged_offset INTEGER NOT NULL, " +
-            "kind TEXT NOT NULL, entity TEXT, attribute TEXT, message TEXT NOT NULL)");
+            "kind TEXT NOT NULL, entity TEXT, attribute TEXT, summary TEXT NOT NULL, details TEXT NOT NULL DEFAULT '')");
+
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{SleepLogTable}') WHERE name = 'message'";
+        if ((long)command.ExecuteScalar()! == 0)
+            return;
+        Execute(connection, transaction, $"ALTER TABLE {Quote(SleepLogTable)} RENAME COLUMN message TO summary");
+        Execute(connection, transaction, $"ALTER TABLE {Quote(SleepLogTable)} ADD COLUMN details TEXT NOT NULL DEFAULT ''");
+    }
 
     // ---------- Changing the layout ----------
 

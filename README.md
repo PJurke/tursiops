@@ -37,7 +37,7 @@ Full specification: [`docs/format.md`](docs/format.md)
 | `tests/Tursiops.Tests` | Tests (xUnit) |
 | `tools/Tursiops.Bench` | Benchmark of storage layouts on SQLite (results in `docs/concepts/time.md`) |
 | `examples` | Example ontologies |
-| `docs` | Developer documentation: format specification, storage layout, known methods per concept (`docs/concepts`) |
+| `docs` | Developer documentation: how Tursiops decides, format specification, storage layout, known methods per concept (`docs/concepts`) |
 
 ## Build
 
@@ -52,11 +52,18 @@ dotnet run --project src/Tursiops.Cli
 Commands:
 
 ```
+tursiops demo <database>    Play the demo: create the database, four waking phases, a sleep after each.
 tursiops sleep <database>   Evaluate the waking phase, decide on layouts, log every decision.
 tursiops log <database>     Show the sleep log.
 ```
 
-How sleep decides and what it logs: [`docs/storage.md`](docs/storage.md#sleep).
+To see Tursiops at work, start with the demo:
+
+```
+dotnet run --project src/Tursiops.Cli -- demo demo.db
+```
+
+How Tursiops decides and how to read its log: [`docs/how-tursiops-decides.md`](docs/how-tursiops-decides.md). The exact rules: [`docs/storage.md`](docs/storage.md#sleep).
 
 Benchmark of the `@history` layouts:
 

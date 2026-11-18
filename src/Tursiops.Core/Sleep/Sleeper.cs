@@ -46,15 +46,18 @@ public static class Sleeper
                 var decision = LayoutDecider.Decide(attribute, entity.Name, observed, entityCount,
                     store.CountValues(entity.Name, attribute.Name), costs, rule);
                 decisions.Add(decision);
-                entries.Add(new SleepLogEntry(Kind(decision.Outcome), entity.Name, attribute.Name, decision.Describe()));
+                entries.Add(new SleepLogEntry(Kind(decision.Outcome), entity.Name, attribute.Name, decision.Summary(), decision.Details()));
             }
         }
 
         var started = store.PhaseStartedAt(phase);
+        var changed = decisions.Count(d => d.Outcome == LayoutOutcome.Changed);
         entries.Insert(0, new SleepLogEntry(SleepLogKind.Sleep, null, null,
-            $"Sleep after waking phase {phase}, which began {started.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture)}. " +
-            $"{Count(decisions.Count(d => d.Outcome == LayoutOutcome.Changed), "layout")} changed, " +
-            $"{Count(decisions.Count(d => d.Outcome != LayoutOutcome.Changed), "layout")} kept."));
+            changed == 0
+                ? $"Tursiops slept after waking phase {phase} and kept every layout."
+                : $"Tursiops slept after waking phase {phase} and changed how {Count(changed, "attribute")} {(changed == 1 ? "is" : "are")} stored.",
+            $"The phase began {started.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture)}. " +
+            $"{Count(changed, "layout")} changed, {Count(decisions.Count - changed, "layout")} kept."));
 
         long next = 0;
         store.InOneTransaction(() =>
@@ -103,10 +106,9 @@ public static class Sleeper
         var most = types[0];
         var others = total - most.Count;
         return new SleepLogEntry(SleepLogKind.TypesMixed, entity, attribute,
-            $"{name}: values set in this phase have different types: " +
-            string.Join(", ", types.Select(t => $"{Number(t.Count)} {TypeName(t.Type, t.Count)}")) + ". " +
-            $"Most are {TypeName(most.Type, 2)}. Every value is kept as it was given; " +
-            $"the {Count(others, "value")} of other types may be mistakes.");
+            $"{name} received values of different types in this phase. Every value is kept as it was given.",
+            "Types: " + string.Join(", ", types.Select(t => $"{Number(t.Count)} {TypeName(t.Type, t.Count)}")) + ". " +
+            $"Most are {TypeName(most.Type, 2)}; the {Count(others, "value")} of other types may be mistakes.");
     }
 
     private static string TypeName(TechnicalType type, long count) => (type, count == 1) switch

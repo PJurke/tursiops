@@ -35,6 +35,7 @@ public enum LayoutOutcome
 /// <param name="Required">Saving a layout needs to exceed: change cost plus the share of the current cost, in microseconds.</param>
 /// <param name="Best">The alternative layout with the largest saving, or <c>null</c> if not enough data.</param>
 /// <param name="Saving">What <paramref name="Best"/> saves against the current layout, in microseconds.</param>
+/// <param name="Driver">The operation where <paramref name="Best"/> and the current layout differ most, or <c>null</c> if not enough data.</param>
 public sealed record LayoutDecision(
     string Entity,
     string Attribute,
@@ -49,38 +50,69 @@ public sealed record LayoutDecision(
     double Required,
     AttributeLayout? Best,
     double Saving,
+    CountedOperation? Driver,
     LayoutRule Rule)
 {
     /// <summary>The layout after the decision.</summary>
     public AttributeLayout Result => Outcome == LayoutOutcome.Changed ? Best!.Value : Current;
 
-    /// <summary>The decision in readable English, with the numbers it rests on (E-04).</summary>
-    public string Describe()
+    /// <summary>What the sleep did and what it means for the developer, in plain words (E-37).</summary>
+    public string Summary()
     {
         var name = $"{Entity}.{Attribute}";
-        if (Outcome == LayoutOutcome.NotEnoughData)
-            return $"{name}: {Count(Operations)} operations in this phase, at least {Count(Rule.MinOperations)} are needed to decide. " +
-                   $"Kept {LayoutNames.Describe(Current)}.";
+        return Outcome == LayoutOutcome.Changed
+            ? $"{name} is now stored as {LayoutNames.Describe(Result)}. The information and how you read it are unchanged."
+            : $"{name} stays stored as {LayoutNames.Describe(Current)}. Nothing changes for you.";
+    }
 
+    /// <summary>The reason in one sentence, then the numbers it rests on, so every figure can be recomputed (E-04, E-36).</summary>
+    public string Details()
+    {
+        if (Outcome == LayoutOutcome.NotEnoughData)
+            return $"This waking phase had too little use to decide: {Count(Operations)} operations, " +
+                   $"at least {Count(Rule.MinOperations)} are needed.";
+
+        var bestName = LayoutNames.Short(Best!.Value);
+        var reason = Outcome switch
+        {
+            LayoutOutcome.Changed =>
+                $"{Capitalize(OperationName(Driver!.Value))} is cheaper in {bestName} and made the biggest difference in this phase.",
+            _ when Saving > 0 =>
+                $"{bestName} would be cheaper, mainly for {OperationName(Driver!.Value)}, but not by enough to be worth a change.",
+            _ => $"{LayoutNames.Short(Current)} is already the cheaper layout for how the attribute was used.",
+        };
         var observed =
             $"{Count(Observed.Writes)} writes ({Count(Observed.LateWrites)} of them late), " +
             $"{Count(Observed.CurrentReads)} reads of one current value, " +
             $"{Count(Observed.AllCurrentReads)} reads of all {Count(Entities)} current values, " +
             $"{Count(Observed.HistoryReads)} history reads";
-        var estimates = string.Join(", ", Estimates.Select(e => $"{LayoutNames.Describe(e.Key)} {Ms(e.Value)}"));
-        var bestName = LayoutNames.Short(Best!.Value);
+        var estimates = string.Join(", ", Estimates.Select(e => $"{LayoutNames.Short(e.Key)} {Ms(e.Value)}"));
         var required =
             $"A change has to save more than {Ms(Required)}: {Ms(ChangeCost)} for changing {Count(Values)} values " +
-            $"plus {Percent(Rule.MinSavingShare)} of the current cost.";
+            $"plus {Percent(Rule.MinSavingShare)} of the cost in {LayoutNames.Short(Current)}.";
         var verdict = Outcome == LayoutOutcome.Changed
-            ? $"{bestName} saves {Ms(Saving)}. Changed to {LayoutNames.Describe(Best.Value)}."
+            ? $"{bestName} saves {Ms(Saving)}."
             : Saving > 0
-                ? $"{bestName} would save {Ms(Saving)}. Kept {LayoutNames.Describe(Current)}."
-                : $"{bestName} would cost {Ms(-Saving)} more. Kept {LayoutNames.Describe(Current)}.";
+                ? $"{bestName} would save {Ms(Saving)}."
+                : $"{bestName} would cost {Ms(-Saving)} more.";
 
-        return $"{name}: {Count(Operations)} operations in this phase: {observed}. " +
+        return $"{reason} Counted in this phase: {Count(Operations)} operations, {observed}. " +
                $"Estimated cost of the phase: {estimates}. {required} {verdict}";
     }
+
+    /// <summary>Summary and details as one text.</summary>
+    public string Describe() => $"{Summary()} {Details()}";
+
+    private static string OperationName(CountedOperation operation) => operation switch
+    {
+        CountedOperation.Write => "writing values",
+        CountedOperation.CurrentRead => "reading the current value of one entity",
+        CountedOperation.AllCurrentRead => "reading the current values of all entities",
+        CountedOperation.HistoryRead => "reading histories",
+        _ => operation.ToString(),
+    };
+
+    private static string Capitalize(string text) => char.ToUpperInvariant(text[0]) + text[1..];
 
     private static string Count(long n) => n.ToString("N0", CultureInfo.InvariantCulture);
 
@@ -107,7 +139,7 @@ public static class LayoutDecider
         var operations = observed.Writes + observed.CurrentReads + observed.AllCurrentReads + observed.HistoryReads;
         if (operations < rule.MinOperations)
             return new LayoutDecision(entity, attribute.Name, LayoutOutcome.NotEnoughData, attribute.Layout, observed, operations,
-                entities, values, new Dictionary<AttributeLayout, double>(), 0, 0, null, 0, rule);
+                entities, values, new Dictionary<AttributeLayout, double>(), 0, 0, null, 0, null, rule);
 
         var estimates = AttributeLayouts.AllowedFor(attribute.Time)
             .ToDictionary(l => l, l => costs.Estimate(l, observed, entities));
@@ -119,8 +151,14 @@ public static class LayoutDecider
         var saving = current - estimates[best];
         var outcome = saving > required ? LayoutOutcome.Changed : LayoutOutcome.Kept;
 
+        // The operation where the two layouts differ most, in the direction of the saving: what the log names as the reason.
+        var currentParts = costs.EstimateParts(attribute.Layout, observed, entities);
+        var bestParts = costs.EstimateParts(best, observed, entities);
+        var sign = saving >= 0 ? 1 : -1;
+        var driver = currentParts.Keys.MaxBy(o => sign * (currentParts[o] - bestParts[o]));
+
         return new LayoutDecision(entity, attribute.Name, outcome, attribute.Layout, observed, operations, entities, values,
-            estimates, changeCost, required, best, saving, rule);
+            estimates, changeCost, required, best, saving, driver, rule);
     }
 }
 

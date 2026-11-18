@@ -24,8 +24,16 @@ public enum SleepLogKind
     LayoutChanged,
 }
 
-/// <summary>One entry of the sleep log. <see cref="Entity"/> and <see cref="Attribute"/> are null for the whole sleep.</summary>
-public sealed record SleepLogEntry(SleepLogKind Kind, string? Entity, string? Attribute, string Message);
+/// <summary>
+/// One entry of the sleep log. <see cref="Entity"/> and <see cref="Attribute"/> are null for the whole sleep.
+/// E-37: <see cref="Summary"/> says in plain words what Tursiops did and what it means for the developer;
+/// <see cref="Details"/> gives the reason in one sentence, then the numbers to recompute it.
+/// </summary>
+public sealed record SleepLogEntry(SleepLogKind Kind, string? Entity, string? Attribute, string Summary, string Details = "")
+{
+    /// <summary>Summary and details as one text.</summary>
+    public string Message => Details.Length == 0 ? Summary : $"{Summary} {Details}";
+}
 
 /// <summary>A stored entry: which waking phase it evaluated and when it was written.</summary>
 public sealed record SleepLogRecord(long Phase, DateTimeOffset LoggedAt, SleepLogEntry Entry);

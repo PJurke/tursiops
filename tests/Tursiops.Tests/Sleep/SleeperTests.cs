@@ -47,7 +47,7 @@ public class SleeperTests : IDisposable
             Assert.All(log, r => Assert.Equal(1, r.Phase));
             Assert.All(log, r => Assert.Equal(Now, r.LoggedAt));
             Assert.Equal(SleepLogKind.Sleep, log[0].Entry.Kind);
-            Assert.StartsWith("Sleep after waking phase 1", log[0].Entry.Message);
+            Assert.StartsWith("Tursiops slept after waking phase 1", log[0].Entry.Summary);
             Assert.Equal(2, store.Phase);
         }
     }
@@ -96,6 +96,28 @@ public class SleeperTests : IDisposable
 
         Assert.Equal(LayoutOutcome.NotEnoughData, Assert.Single(report.Decisions).Outcome);
         Assert.Contains(report.Entries, e => e.Kind == SleepLogKind.NotEnoughData && e.Message.Contains("7 operations"));
+    }
+
+    [Fact]
+    public void LogFromBeforeE37_WithOneMessageColumn_IsReadAsSummary()
+    {
+        var path = TempFile();
+        using (var store = Create(path))
+        {
+            Fill(store, people: 1, valuesEach: 1);
+            Sleeper.Run(store);
+        }
+        Execute(path,
+            "ALTER TABLE _tursiops_sleep_log DROP COLUMN details; " +
+            "ALTER TABLE _tursiops_sleep_log RENAME COLUMN summary TO message; " +
+            "UPDATE _tursiops_sleep_log SET message = 'An entry from before.'");
+
+        using var reopened = SqliteStore.Open(path);
+        Assert.All(reopened.GetSleepLog(), r =>
+        {
+            Assert.Equal("An entry from before.", r.Entry.Summary);
+            Assert.Equal("", r.Entry.Details);
+        });
     }
 
     [Fact]
