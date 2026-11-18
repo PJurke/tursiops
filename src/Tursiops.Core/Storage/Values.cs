@@ -65,11 +65,15 @@ public static class ValueTypes
         null or DBNull => null,
         sbyte or byte or short or ushort or int or uint or long or ulong or float or double or decimal => BaseType.Number,
         string => BaseType.Text,
-        DateTimeOffset or DateTime or DateOnly => BaseType.Date,
+        DateTimeOffset or DateOnly => BaseType.Date,
         bool => BaseType.Bi,
+        // E-42: a DateTime would be stored without its time zone, so it could not be read back as meant.
+        DateTime => throw new ArgumentException(
+            "Values of type DateTime are not supported, because they would be stored without a time zone. " +
+            "Use DateTimeOffset for a point in time, or DateOnly if only the day is known.", nameof(value)),
         _ => throw new ArgumentException(
             $"Values of type {value.GetType().Name} are not supported. " +
-            "Use a number, text, a date (DateTimeOffset, DateTime, DateOnly) or a boolean.", nameof(value)),
+            "Use a number, text, a date (DateTimeOffset, DateOnly) or a boolean.", nameof(value)),
     };
 
     /// <summary>Rejects a value that does not fit the declared type of <paramref name="entity"/>.<paramref name="attribute"/>.</summary>

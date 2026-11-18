@@ -1,6 +1,6 @@
 # Storage in SQLite
 
-How the translation layer in `src/Tursiops.Core/Storage/Sqlite` lays out a Tursiops database in SQLite. The reasons behind it are recorded in the project's decision log (E-06, E-21, E-23, E-25 to E-35, E-37, E-38, E-40, E-41).
+How the translation layer in `src/Tursiops.Core/Storage/Sqlite` lays out a Tursiops database in SQLite. The reasons behind it are recorded in the project's decision log (E-06, E-21, E-23, E-25 to E-35, E-37, E-38, E-40 to E-42).
 
 Only the translation layer knows tables and SQL. Everything else works with entities, attributes and storage layouts. Which layouts exist for which attribute is described in `StructureModel.cs`.
 
@@ -33,9 +33,21 @@ Files from before declared types (decision log E-41) have no column `type` in `_
 
 One table per entity, named like the entity. `_id INTEGER PRIMARY KEY` is the internal key: an increasing integer handed out when the entity is created. It is not meant to be visible to applications.
 
-Value columns have no declared type in SQLite; Tursiops checks each value against the attribute's base type before writing (`ValueTypes.Check`, decision log E-41). Numbers (any .NET number type) fit `number`, `string` fits `text`, `DateTimeOffset`, `DateTime` and `DateOnly` fit `date`, `bool` fits `bi`. A value of another type is rejected, not converted, and the failed operation is not counted. `null` is rejected only for `bi`. Other .NET types are always rejected.
+Value columns have no declared type in SQLite; Tursiops checks each value against the attribute's base type before writing (`ValueTypes.Check`, decision log E-41). Numbers (any .NET number type) fit `number`, `string` fits `text`, `DateTimeOffset` and `DateOnly` fit `date`, `bool` fits `bi`. A value of another type is rejected, not converted, and the failed operation is not counted. `null` is rejected only for `bi`. `DateTime` is always rejected, because it would be stored without its time zone (decision log E-42); other .NET types are rejected as well.
 
-SQLite keeps the type of each value as it was written, but returns booleans as numbers and dates as text. Reading returns what SQLite returns.
+Every read returns values in their base type (`SqliteValues.Read`, decision log E-42). Microsoft.Data.Sqlite keeps booleans as `0` and `1` and dates and `decimal` as text, and returns them that way ([data types](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/types)), so the translator reads them back:
+
+| Base type | Written as | Stored in SQLite as | Read back as |
+|---|---|---|---|
+| `number` | any whole number type | integer | `long` |
+| `number` | `float`, `double` | real | `double` |
+| `number` | `decimal` | text, e.g. `1.81` | `decimal` |
+| `text` | `string` | text | `string` |
+| `date` | `DateTimeOffset` | text, e.g. `2016-03-03 09:30:15.25+01:00` | `DateTimeOffset` with its offset |
+| `date` | `DateOnly` | text, e.g. `2016-03-03` | `DateOnly` |
+| `bi` | `bool` | integer `0` or `1` | `bool` |
+
+Reading dates and `decimal` back from text costs time. The measured costs in [`concepts/time.md`](concepts/time.md) use whole numbers and are not affected.
 
 ## Layouts
 

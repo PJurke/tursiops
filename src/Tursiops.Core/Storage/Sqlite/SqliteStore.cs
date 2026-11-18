@@ -222,7 +222,7 @@ public sealed class SqliteStore : IDisposable
                 $"SELECT {Quote(attribute)} FROM {Quote(EntityTable(entity.Entity))} WHERE {Quote(IdColumn)} = $id",
                 ("$id", entity.Id));
             Observe(entity.Entity, attribute, Counter.ReadCurrent);
-            return value is null or DBNull ? null : new StoredValue(value, null);
+            return value is null or DBNull ? null : new StoredValue(SqliteValues.Read(value, target.Type), null);
         }
 
         var latest = target.Layout == AttributeLayout.HistoryTable
@@ -270,7 +270,7 @@ public sealed class SqliteStore : IDisposable
             var timed = target.Layout != AttributeLayout.Column;
             while (reader.Read())
             {
-                var value = reader.IsDBNull(1) ? null : reader.GetValue(1);
+                var value = SqliteValues.Read(reader.GetValue(1), target.Type);
                 var validAt = timed ? FromStored(reader.GetString(2), reader.GetInt64(3)) : (DateTimeOffset?)null;
                 values.Add(new EntityValue(new EntityRef(entity, reader.GetInt64(0)), new StoredValue(value, validAt)));
             }
@@ -635,7 +635,7 @@ public sealed class SqliteStore : IDisposable
             $"FROM {Quote(HistoryTable(entity.Entity, attribute))} WHERE {Quote(EntityColumn)} = $id " +
             $"ORDER BY {Quote(ValidAtColumn)} {direction}, rowid {direction}" +
             (limit is null ? "" : $" LIMIT {limit}"),
-            entity.Id);
+            entity, attribute);
     }
 
     // H1: older values from the history table, the current value from the entity row.
@@ -649,23 +649,25 @@ public sealed class SqliteStore : IDisposable
             $"FROM {Quote(EntityTable(entity.Entity))} " +
             $"WHERE {Quote(IdColumn)} = $id AND {Quote(CurrentValidAtColumn(attribute))} IS NOT NULL " +
             "ORDER BY 2, 4, 5",
-            entity.Id);
+            entity, attribute);
 
     private List<TimedValue> ReadCurrentTimed(EntityRef entity, string attribute) =>
         ReadTimed(
             $"SELECT {Quote(attribute)}, {Quote(CurrentValidAtColumn(attribute))}, {Quote(CurrentValidOffsetColumn(attribute))} " +
             $"FROM {Quote(EntityTable(entity.Entity))} " +
             $"WHERE {Quote(IdColumn)} = $id AND {Quote(CurrentValidAtColumn(attribute))} IS NOT NULL",
-            entity.Id);
+            entity, attribute);
 
-    private List<TimedValue> ReadTimed(string sql, long id)
+    private List<TimedValue> ReadTimed(string sql, EntityRef entity, string attribute)
     {
+        var type = Structure.Entity(entity.Entity).Attribute(attribute).Type;
+        var id = entity.Id;
         using var command = Command(sql, ("$id", id));
         using var reader = command.ExecuteReader();
         var values = new List<TimedValue>();
         while (reader.Read())
         {
-            var value = reader.IsDBNull(0) ? null : reader.GetValue(0);
+            var value = SqliteValues.Read(reader.GetValue(0), type);
             values.Add(new TimedValue(value, FromStored(reader.GetString(1), reader.GetInt64(2))));
         }
         return values;

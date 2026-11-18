@@ -43,7 +43,7 @@ comment    = "//" { any_char } ;
 - **Types:** Every attribute declares a base type after a colon, before unit and annotations: `Körpergröße: number @history`. Spaces around the colon are optional.
   - `number`: whole numbers and decimals.
   - `text`: text, even if it looks like a number.
-  - `date`: a point in time.
+  - `date`: a point in time with its offset from UTC, or a day when only the day is known. Values without a time zone are rejected (decision log E-42).
   - `bi`: two-valued, only `true` or `false`.
   - Types are case-sensitive; for `Number` the error message suggests `number`, for `boolean` or `bool` it suggests `bi`. A missing or unknown type is an error. Type names are not reserved and may be used as names.
   - The type is part of the information (decision log E-41). Tursiops rejects values of another type when they are written and never converts them, so `"181"` is rejected for a `number`. `null` is accepted for `number`, `text` and `date`, not for `bi`. Any attribute may have no value because it was never set.

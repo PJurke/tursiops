@@ -5,7 +5,7 @@ using Tursiops.Core.Storage.Sqlite;
 
 namespace Tursiops.Tests.Storage;
 
-// Tests for the translation layer to SQLite (E-21, E-23, E-25 to E-27, E-41).
+// Tests for the translation layer to SQLite (E-21, E-23, E-25 to E-27, E-41, E-42).
 public class SqliteStoreTests : IDisposable
 {
     private const string Source = """
@@ -23,6 +23,8 @@ public class SqliteStoreTests : IDisposable
           Tag: date
           Wahr: bi
           Messung: number @history
+          Termin: date @history
+          Erfüllt: bi @history
         }
         """;
 
@@ -251,7 +253,7 @@ public class SqliteStoreTests : IDisposable
     {
         { "Zahl", 42 }, { "Zahl", 42L }, { "Zahl", 4.2 }, { "Zahl", 1.81m },
         { "Wort", "Anna" }, { "Wort", "180" },
-        { "Tag", Age10 }, { "Tag", Age10.UtcDateTime }, { "Tag", new DateOnly(2016, 3, 3) },
+        { "Tag", Age10 }, { "Tag", new DateOnly(2016, 3, 3) },
         { "Wahr", true }, { "Wahr", false },
     };
 
@@ -276,6 +278,84 @@ public class SqliteStoreTests : IDisposable
         { "Tag", "2016-03-03", "date" }, { "Tag", 20160303L, "date" },
         { "Wahr", 1L, "bi" }, { "Wahr", "true", "bi" },
     };
+
+    [Fact] // E-42: DateTime has no time zone, so the stored value would not say what was meant
+    public void DateTime_IsRejected()
+    {
+        using var store = Memory(TypesModel());
+        var probe = store.CreateEntity("Probe");
+
+        var error = Assert.Throws<ArgumentException>(() => store.SetValue(probe, "Tag", Age10.UtcDateTime));
+
+        Assert.Contains("DateTimeOffset", error.Message);
+        Assert.Null(store.GetCurrentValue(probe, "Tag"));
+    }
+
+    [Theory] // E-42: values come back in their base type, not as SQLite keeps them
+    [MemberData(nameof(ValuesAndHowTheyComeBack))]
+    public void ValuesComeBackInTheirBaseType(string attribute, object written, object expected)
+    {
+        var path = TempFile();
+        EntityRef probe;
+        using (var store = SqliteStore.Create(path, TypesModel()))
+        {
+            probe = store.CreateEntity("Probe");
+            store.SetValue(probe, attribute, written);
+            AssertSameValue(expected, store.GetCurrentValue(probe, attribute)!.Value);
+        }
+
+        using var reopened = SqliteStore.Open(path);
+        AssertSameValue(expected, reopened.GetCurrentValue(probe, attribute)!.Value);
+        AssertSameValue(expected, Assert.Single(reopened.GetCurrentValues("Probe", attribute)).Value.Value);
+    }
+
+    public static TheoryData<string, object, object> ValuesAndHowTheyComeBack() => new()
+    {
+        { "Zahl", 42L, 42L },
+        { "Zahl", 42, 42L },          // whole numbers come back as long
+        { "Zahl", 4.2, 4.2 },
+        { "Zahl", 1.81m, 1.81m },     // decimal stays decimal, SQLite keeps it as text
+        { "Zahl", 0.1m + 0.2m, 0.3m },
+        { "Wort", "180", "180" },
+        { "Tag", Berlin, Berlin },    // with its offset
+        { "Tag", new DateTimeOffset(2016, 3, 3, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2016, 3, 3, 0, 0, 0, TimeSpan.Zero) },
+        { "Tag", new DateOnly(2016, 3, 3), new DateOnly(2016, 3, 3) },
+        { "Wahr", true, true },
+        { "Wahr", false, false },
+    };
+
+    [Theory] // E-42: also in the history, in both layouts and after a layout change
+    [InlineData(AttributeLayout.HistoryTable)]
+    [InlineData(AttributeLayout.CurrentColumnAndHistoryTable)]
+    public void HistoryValuesComeBackInTheirBaseType(AttributeLayout layout)
+    {
+        var model = TypesModel()
+            .WithLayout("Probe", "Messung", layout)
+            .WithLayout("Probe", "Termin", layout)
+            .WithLayout("Probe", "Erfüllt", layout);
+        using var store = Memory(model);
+        var probe = store.CreateEntity("Probe");
+        store.SetValue(probe, "Messung", 1.81m, ValueTime.At(Age10));
+        store.SetValue(probe, "Messung", 182L, ValueTime.At(Age12));
+        store.SetValue(probe, "Termin", new DateOnly(2016, 3, 3), ValueTime.At(Age10));
+        store.SetValue(probe, "Termin", Berlin, ValueTime.At(Age12));
+        store.SetValue(probe, "Erfüllt", false, ValueTime.At(Age10));
+        store.SetValue(probe, "Erfüllt", true, ValueTime.At(Age12));
+
+        void Check()
+        {
+            AssertValues([1.81m, 182L], store.GetHistory(probe, "Messung"));
+            AssertValues([new DateOnly(2016, 3, 3), Berlin], store.GetHistory(probe, "Termin"));
+            AssertValues([false, true], store.GetHistory(probe, "Erfüllt"));
+            AssertSameValue(true, store.GetCurrentValue(probe, "Erfüllt")!.Value);
+        }
+
+        Check();
+        var other = layout == AttributeLayout.HistoryTable ? AttributeLayout.CurrentColumnAndHistoryTable : AttributeLayout.HistoryTable;
+        foreach (var attribute in new[] { "Messung", "Termin", "Erfüllt" })
+            store.ChangeLayout("Probe", attribute, other);
+        Check();
+    }
 
     [Fact]
     public void TimedValueOfAnotherType_IsRejected()
@@ -451,6 +531,25 @@ public class SqliteStoreTests : IDisposable
     // ---------- Helpers ----------
 
     private static StructureModel Model() => StructureModel.FromOntology(TurParser.Parse(Source).Ontology);
+
+    private static readonly DateTimeOffset Berlin = new(2016, 3, 3, 9, 30, 15, 250, TimeSpan.FromHours(1));
+
+    // Same value and same .NET type; for dates also the same offset.
+    private static void AssertSameValue(object expected, object? actual)
+    {
+        Assert.NotNull(actual);
+        Assert.IsType(expected.GetType(), actual);
+        Assert.Equal(expected, actual);
+        if (expected is DateTimeOffset date)
+            Assert.Equal(date.Offset, ((DateTimeOffset)actual).Offset);
+    }
+
+    private static void AssertValues(object[] expected, IReadOnlyList<TimedValue> history)
+    {
+        Assert.Equal(expected.Length, history.Count);
+        for (var i = 0; i < expected.Length; i++)
+            AssertSameValue(expected[i], history[i].Value);
+    }
 
     private static StructureModel TypesModel() => StructureModel.FromOntology(TurParser.Parse(TypesSource).Ontology);
 
