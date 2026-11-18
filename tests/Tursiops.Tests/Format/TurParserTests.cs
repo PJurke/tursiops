@@ -3,7 +3,7 @@ using Tursiops.Core.Format;
 namespace Tursiops.Tests.Format;
 
 // Tests for the parser of ontology format v0.1 (grammar E-24, approach E-16).
-// Error and warning tests check the kind, line and column, not the message wording (E-17, E-24).
+// Error and warning tests check the kind, line and column, not the message wording (E-24).
 public class TurParserTests
 {
     // ---------- Valid files ----------

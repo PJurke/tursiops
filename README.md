@@ -6,7 +6,7 @@ The name comes from the common bottlenose dolphin (*Tursiops truncatus*). Dolphi
 
 ## Status
 
-First prototype in progress. It demonstrates a single concept, time. The admin decides what information exists: whether an attribute is timeless, has a current state over time (`@time`) or keeps its full history (`@history`). Tursiops decides how to store it, observes how the data is used and, during sleep, rebuilds the storage when the data suggests it, without ever changing what information is kept. Every decision is recorded in a readable log.
+First prototype complete. It demonstrates a single concept, time. The admin decides what information exists: whether an attribute is timeless, has a current state over time (`@time`) or keeps its full history (`@history`). Tursiops decides how to store it, observes how the data is used and, during sleep, rebuilds the storage when the data suggests it, without ever changing what information is kept. Every decision is recorded in a readable log.
 
 ## Ontology format (v0.1)
 

@@ -1,6 +1,6 @@
 # Storage in SQLite
 
-How the translation layer in `src/Tursiops.Core/Storage/Sqlite` lays out a Tursiops database in SQLite. The reasons behind it are recorded in the project's decision log (E-06, E-13, E-21, E-23, E-25 to E-35).
+How the translation layer in `src/Tursiops.Core/Storage/Sqlite` lays out a Tursiops database in SQLite. The reasons behind it are recorded in the project's decision log (E-06, E-13, E-21, E-23, E-25 to E-35, E-37, E-38, E-40).
 
 Only the translation layer knows tables and SQL. Everything else works with entities, attributes and storage layouts. Which layouts exist for which attribute is described in `StructureModel.cs`.
 
@@ -23,7 +23,7 @@ The structure model is stored in the same file, so a database stays a single fil
 | `_tursiops_structure` | `entity`, `attribute`, `position`, `time`, `layout` | Per attribute: its time behavior (`Timeless`, `CurrentOnly`, `History`) and its storage layout |
 | `_tursiops_phases` | `phase`, `started_at`, `started_offset` | Waking phases, from one sleep to the next, and when each began (see [Observation](#observation)) |
 | `_tursiops_observations` | `phase`, `entity`, `attribute`, `counter`, `count` | Per phase and attribute: how often each counter was hit (see [Observation](#observation)) |
-| `_tursiops_sleep_log` | `entry`, `phase`, `logged_at`, `logged_offset`, `kind`, `entity`, `attribute`, `message` | Every decision of the sleep in readable English, per evaluated phase (see [Sleep](#sleep)) |
+| `_tursiops_sleep_log` | `entry`, `phase`, `logged_at`, `logged_offset`, `kind`, `entity`, `attribute`, `summary`, `details` | Every decision of the sleep in readable English, per evaluated phase (see [Sleep](#sleep)) |
 
 A change of layout changes tables and catalog in one transaction. SQLite rolls back schema changes together with the transaction (covered by tests).
 
@@ -81,7 +81,7 @@ Tursiops counts per attribute how it is used, without changing anything. The sle
 | `read_history` | the history of one entity is read |
 | `type_number`, `type_text`, `type_date`, `type_boolean` | a value of that technical type is set; `null` has no type. Text stays text, even if it looks like a number |
 
-Creating an entity is not counted, nor is an operation that fails. Changing the layout does not change any counter. Operations inside a scope opened with `SqliteStore.Unobserved()` are not counted either; it is meant for checks that are not use of the data, such as the demo comparing all values before and after each sleep.
+Creating an entity is not counted, nor is an operation that fails. Changing the layout does not change any counter. Operations inside a scope opened with `SqliteStore.Unobserved()` are not counted either; it is meant for checks that are not use of the data, such as the demo comparing all values before and after each sleep (decision log E-40).
 
 Counts belong to a waking phase, from one sleep to the next. The first phase is 1. `StartNewPhase` ends the current phase and starts the next one at zero; earlier phases are kept.
 

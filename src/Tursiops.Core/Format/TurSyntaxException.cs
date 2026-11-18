@@ -1,6 +1,6 @@
 namespace Tursiops.Core.Format;
 
-/// <summary>Kind of error in a .tur file. Tests check the kind, not the wording (E-17).</summary>
+/// <summary>Kind of error in a .tur file. Tests check the kind, not the wording (E-24).</summary>
 public enum TurErrorKind
 {
     /// <summary>A name was expected, e.g. for an entity, an attribute or after <c>@</c>.</summary>

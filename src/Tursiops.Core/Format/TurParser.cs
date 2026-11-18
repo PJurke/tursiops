@@ -74,7 +74,7 @@ public static class TurParser
                     $"There is already an entity named '{name}' ({first}). Each entity name may appear only once per file.");
             seenEntities[name] = position;
 
-            // The opening brace may also be on a later line (E-17).
+            // The opening brace may also be on a later line (E-24).
             SkipBlankLinesAndComments();
             if (Current != '{')
                 throw Error(TurErrorKind.ExpectedOpeningBrace, Position,

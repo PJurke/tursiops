@@ -26,7 +26,7 @@ public class SqliteStoreTests : IDisposable
     // ---------- Structure model ----------
 
     [Fact]
-    public void StructureFromOntology_FollowsTheInformationTheUserDescribed() // E-25, ablageformen.md
+    public void StructureFromOntology_FollowsTheInformationTheUserDescribed() // E-25, docs/storage.md
     {
         var mensch = Assert.Single(Model().Entities);
 
