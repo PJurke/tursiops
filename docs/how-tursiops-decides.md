@@ -32,9 +32,9 @@ For each layout, Tursiops estimates what the waking phase would have cost: the n
 Tursiops changes the layout only if the other layout
 
 - saves more than the change itself costs (copying the stored values), and
-- saves at least 20 % of the cost in the current layout on top of that,
+- saves a set share of the cost in the current layout on top of that,
 
-and only if the attribute had at least 100 operations in the phase. The two layouts are often close. Without this margin, Tursiops would change back and forth on small differences. Both thresholds are set by hand for now.
+and only if the attribute had a minimum number of operations in the phase. The two layouts are often close. Without this margin, Tursiops would change back and forth on small differences. Both thresholds are set by hand for now; their values are in [`storage.md`](storage.md#layout-decision).
 
 ## Reading the log
 

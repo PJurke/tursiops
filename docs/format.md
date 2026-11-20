@@ -47,7 +47,7 @@ comment    = "//" { any_char } ;
   - `bi`: two-valued, only `true` or `false`.
   - Types are case-sensitive; for `Number` the error message suggests `number`, for `boolean` or `bool` it suggests `bi`. A missing or unknown type is an error. Type names are not reserved and may be used as names.
   - The type is part of the information (decision log E-41). Tursiops rejects values of another type when they are written and never converts them, so `"181"` is rejected for a `number`. `null` is accepted for `number`, `text` and `date`, not for `bi`. Any attribute may have no value because it was never set.
-- **Names:** contain no spaces, start with a letter and are case-sensitive. Entity names are unique per file, attribute names unique per entity. `in` is a keyword and cannot be a name.
+- **Names:** contain no spaces, start with a letter and are case-sensitive. Entity names are unique per file, attribute names unique per entity. `in` is a keyword and cannot be a name. Names are free to choose, in any language; keywords, types and annotations are English (decision log E-09).
 - **Annotations:** `@time` and `@history` are known. Annotations are case-sensitive; for `@Time` the error message suggests `@time`. Any other annotation is an error.
 - **Meaning of the annotations:**
   - no annotation: timeless, only the last value written counts.

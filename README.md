@@ -20,15 +20,7 @@ Mensch {
 }
 ```
 
-Every attribute declares its base type after a colon: `number`, `text`, `date` or `bi` (true or false). Values of another type are rejected, not converted.
-
-Entity and attribute names are free to choose, in any language; keywords, types and annotations such as `@time` are English.
-
-Redundant annotations such as `@time @time`, or `@time` next to `@history`, are reported as warnings and do not stop parsing.
-
-Example: [`examples/mensch.tur`](examples/mensch.tur)
-
-Full specification: [`docs/format.md`](docs/format.md)
+Every attribute declares a base type after the colon. Example: [`examples/mensch.tur`](examples/mensch.tur). Full specification: [`docs/format.md`](docs/format.md).
 
 ## Layout
 
@@ -50,6 +42,8 @@ dotnet build
 dotnet test
 dotnet run --project src/Tursiops.Cli
 ```
+
+`dotnet test` also checks that the documentation matches the code: numbers, code names and links (`tests/Tursiops.Tests/Docs`). GitHub runs all tests on every push.
 
 Commands:
 

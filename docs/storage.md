@@ -127,7 +127,7 @@ Costs depend on the target system. For SQLite they are in `SqliteCosts.Measured`
 | Read history, one entity | 31 | 39.5 |
 | Change layout, per value | 0.55 | 0.55 |
 
-With these numbers, H1 only wins when current values of all entities are read often. H2 wins back only when histories are read often: H1 writes about 12 % slower, less than the required 20 %, so writing alone does not change H1 back to H2.
+With these numbers, H1 only wins when current values of all entities are read often. H2 wins back only when histories are read often: H1 writes slower, but by less than the required share, so writing alone does not change H1 back to H2.
 
 ### Log
 
